@@ -1,0 +1,12 @@
+{
+    "service_conf_path" : "Services",
+    "service_data_path" : "Services/Data",
+    "external_queue_path" : "Queue",
+    "external_data_path" : "Output",
+    "run_interval" : 1,
+    "reserved_keys" : ["service", "name"],
+    "pbs_queue_path" : "PBS/Queue",
+    "pbs_work_path" : "PBS/Scratch",
+    "pbs_queue" : "default",
+    "pbs_max_jobs" : 100
+}
