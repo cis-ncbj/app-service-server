@@ -1,0 +1,17 @@
+{
+    "service" : {
+        "type" : "string",
+        "default" : "",
+        "values" : ["MultiNest", "Test"]
+    },
+    "scheduler" : {
+        "type" : "string",
+        "default" : "pbs",
+        "values" : ["pbs"]
+    },
+    "queue" : {
+        "type" : "string",
+        "default" : "",
+        "values" : ["", "default"]
+    }
+}

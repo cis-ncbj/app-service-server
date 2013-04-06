@@ -6,6 +6,6 @@
     "gate_path_output" : "Output",
     "pbs_path_queue" : "PBS/Queue",
     "pbs_path_work" : "PBS/Scratch",
-    "pbs_default_queue" : "default",
+    "pbs_default_queue" : "short",
     "pbs_max_jobs" : 100
 }
