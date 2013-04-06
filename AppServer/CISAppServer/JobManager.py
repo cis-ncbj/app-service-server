@@ -188,7 +188,7 @@ class Job(object):
             error("@Job - Cannot write to status file %s." % _name,
                   exc_info=True)
 
-        info("Job %s finished: %s" % (self.id, state)
+        info("Job %s finished: %s" % (self.id, state))
 
     def __check_state(self):
         """
