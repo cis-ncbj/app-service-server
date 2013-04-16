@@ -1,4 +1,8 @@
 # -*- coding: UTF-8 -*-
+"""
+Utility classes used by CISAppServer: validation, communication with queue
+managers, etc.
+"""
 
 import os
 try:
@@ -25,6 +29,12 @@ def rmtree_error(function, path, exc_info):
           exc_info=exc_info)
 
 def verbose(msg, exc_info=False):
+    """
+    Log message with VERBOSE log level.
+
+    VERBOSE log level is higher than DEBUG and should be used for large debug
+    messages, e.g. data dumps, output from subprocesses, etc.
+    """
     log(VERBOSE, msg, exc_info=exc_info)
 
 class CTemplate(string.Template):
@@ -92,6 +102,8 @@ class Validator(object):
                       for _k, _v in self.services[_data['service']].items()}
         _variables.update({_k: _v['default']
                       for _k, _v in self.services['default'].items()})
+
+        #@TODO Web service should not be allowed to set values for reserved keys
 
         # Check that all attribute names are defined in service configuration
         # Validate values of the attributes
@@ -383,8 +395,6 @@ class PbsScheduler(Scheduler):
     Allows for job submission, deletion and extraction of job status.
     """
 
-    #TODO Actual PBS interface implementattion :-p
-
     def __init__(self):
         #: PBS Working directory path
         self.work_path = conf.pbs_path_work
@@ -526,8 +536,6 @@ class PbsScheduler(Scheduler):
         :return: True on success and False otherwise.
         """
 
-        #TODO remove input data & scripts
-        #TODO add creation of status.txt with job return value
         debug("@PBS - Retrive job output: %s" % job.id)
         _work_dir = os.path.join(self.work_path, job.id)
         _status = 0

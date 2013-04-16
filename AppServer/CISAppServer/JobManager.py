@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
+"""
+Main module of CISAppServer. Responsible for job management.
+"""
 
 import os
 #import sys
