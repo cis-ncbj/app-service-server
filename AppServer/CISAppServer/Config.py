@@ -19,8 +19,11 @@ class Config(dict):
 
     CISAppServer defines global instance of Config class: conf.
     Config stores variables as instace members e.g.:
+
         conf.config_file
+
     The variables are also accessible via dictionary interface e.g.:
+
         conf['conf_file']
     """
 
