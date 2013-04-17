@@ -46,7 +46,7 @@ class CTemplate(string.Template):
     """
     #: Delimiter identifying keywords.
     delimiter = '@@'
-    idpattern = '[_a-z0-9]*'
+    idpattern = '[_a-z0-9]+'
 
 
 class Validator(object):
