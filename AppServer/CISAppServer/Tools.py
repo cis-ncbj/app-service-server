@@ -28,6 +28,7 @@ def rmtree_error(function, path, exc_info):
     error("@rmtree - Cannot remove job output: %s %s" % (function, path),
           exc_info=exc_info)
 
+
 def verbose(msg, exc_info=False):
     """
     Log message with VERBOSE log level.
@@ -36,6 +37,7 @@ def verbose(msg, exc_info=False):
     messages, e.g. data dumps, output from subprocesses, etc.
     """
     log(VERBOSE, msg, exc_info=exc_info)
+
 
 class CTemplate(string.Template):
     """
@@ -86,6 +88,11 @@ class Validator(object):
         :param job: :py:class:`Job` instance
         :rerurn: True on success False otherwise.
         """
+
+        # Do not validate jobs for the second time. This will conserve
+        # resources in case shceduler queue is full and we try to resubmit
+        if job.valid_data:
+            return True
 
         _data = job.data
 
@@ -420,6 +427,16 @@ class PbsScheduler(Scheduler):
         :return: True on success and False otherwise.
         """
 
+        # Check that maximum job limit is not exceeded
+        try:
+            _queue = os.listdir(self.queue_path)
+        except:
+            error("@PBS - unable to read queue directory %s." %
+                  self.queue_path, exc_info=True)
+            return False
+        if len(_queue) >= self.max_jobs:
+            return False
+
         # Path names
         _work_dir = os.path.join(self.work_path, job.id)
         _run_script = os.path.join(_work_dir, "pbs.sh")
@@ -496,7 +513,8 @@ class PbsScheduler(Scheduler):
                     str(_output)
                 ))
         except:
-            error("@PBS - Unable to check job %s state." % job.id, exc_info=True)
+            error("@PBS - Unable to check job %s state." %
+                  job.id, exc_info=True)
             return _status
 
         if _done == 0:
@@ -522,15 +540,73 @@ class PbsScheduler(Scheduler):
                                 job.id, exc_info=True)
                         return 'unknown'
 
-        elif os.path.isfile(os.path.join(_work_dir, 'status.dat')):
+        # When job is finished either epilogue was executed and status.dat is
+        # present or at least output.log should be present - set as done.
+        # Otherwise we are facing communication problems with PBS leave it as
+        # unknown
+        elif os.path.isfile(os.path.join(_work_dir, 'status.dat')) or \
+                os.path.isfile(os.path.join(_work_dir, 'output.log')):
             debug("@PBS - Found job state: D")
             _status = 'done'
 
         return _status
 
-    def stop(self, job):
-        """Stop running job and remove it from PBS queue."""
-        return True
+    def stop(self, job, msg):
+        """
+        Stop running job and remove it from PBS queue.
+
+        :param job: :py:class:`Job` instance
+        :param msg: Message that will be passed to the user
+        :return: True on success and False otherwise.
+        """
+        _status = True # Return value
+        _pbs_id = ''
+        _work_dir = os.path.join(self.work_path, job.id)
+
+        # Get Job PBS ID
+        try:
+            with open(os.path.join(self.queue_path, job.id)) as _pbs_file:
+                _pbs_id = _pbs_file.readline().strip()
+        except:
+            job.die('@PBS - Unable to read PBS job ID', exc_info=True)
+            _status = False
+
+        # Run qdel
+        try:
+            debug("@PBS - Killing job")
+            _opts = ["/usr/bin/qdel", _pbs_id]
+            _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
+            _output = _proc.communicate()[0]
+            # Check return code. If qstat was not killed by signal Popen will
+            # not rise an exception
+            if _proc.returncode != 0:
+                raise OSError((
+                    _proc.returncode,
+                    "/usr/bin/qdel returned non zero exit code.\n%s" %
+                    str(_output)
+                ))
+        except:
+            job.die("@PBS - Unable to terminate job %s." %
+                    job.id, exc_info=True)
+            _status = False
+
+        # Remove PBS ID file
+        try:
+            os.unlink(os.path.join(self.queue_path, job.id))
+        except:
+            job.die("@PBS - Unable to remove job id file %s" %
+                    job.id, exc_info=True)
+            _status = False
+
+        # Remove the working directory and its contents
+        if os.path.isdir(_work_dir):
+            shutil.rmtree(_work_dir, onerror=rmtree_error)
+
+        # Set job state as killed
+        if _status:
+            job.exit(msg, state='killed')
+
+        return _status
 
     def finalise(self, job):
         """

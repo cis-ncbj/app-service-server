@@ -236,6 +236,12 @@ class JobManager(object):
         self.init()
 
     def init(self):
+        """
+        Initialize JobManager. Creates new instaces of Validator and
+        Schedulers. Loads existing jobs from file system.
+
+        Existing state is purged.
+        """
         # Initialize Validator and PbsManager
         self.validator = T.Validator()  #: Validator instance
         self.schedulers = {  #: Scheduler interface instances
@@ -244,8 +250,25 @@ class JobManager(object):
 
         # Job list
         self.__jobs = {}
+        # State of the job queue
+        self.__queue_running = True
 
-        #TODO load existing jobs
+        # Load existing jobs
+        _list = os.listdir(conf.gate_path_jobs)
+        for _jid in _list:
+            debug('@JManager - Detected active job %s.' % _jid)
+
+            # Create new job instance
+            _job = Job(_jid)
+            if _job is None:
+                continue
+
+            if _jid in self.__jobs.keys():
+                _job.die("@JManager - Job ID already used: %s" % _jid)
+
+            self.__jobs[_jid] = _job
+            # Make sure Job.valid_data is present
+            self.validator.validate(_job)
 
     def get_job(self, job_id, create=False):
         """
@@ -302,12 +325,9 @@ class JobManager(object):
                 self.__jobs[_jid] = _job
                 if self.submit(_job):
                     _job.set_state('queued')
-                else:
-                    # Assume that the error was during parsing of input data.
-                    # If it was otherwise lower level routines should have
-                    # issued and ERROR already.
-                    _job.die("@JManager - Cannot start job %s." % _jid,
-                             err=False)
+                # Submit can return False when queue is full. Do not terminate
+                # job here so it can be resubmitted next time. If submission
+                # failed scheduler should have set job state to Aborted anyway.
             except:
                 _job.die("@JManager - Cannot start job %s." % _jid,
                          exc_info=True)
@@ -321,13 +341,13 @@ class JobManager(object):
 
         # Loop over supported schedulers
         for _sname, _scheduler in self.schedulers.items():
-            # Check the "queue_path" for files with scheduler IDs. This
+            # check the "queue_path" for files with scheduler ids. this
             # directory should only be accessible inside of the firewall so it
             # should be safe from corruption by clients.
             try:
                 _queue = os.listdir(_scheduler.queue_path)
             except:
-                error("@JManager - Unable to read %s queue directory %s." %
+                error("@jmanager - unable to read %s queue directory %s." %
                       (_sname, _scheduler.queue_path), exc_info=True)
                 continue
 
@@ -384,7 +404,9 @@ class JobManager(object):
             try:
                 # Stop if it is running
                 if _job.get_state() == 'running':
-                    self.schedulers[_job.valid_data['scheduler']].stop(_job)
+                    self.schedulers[_job.valid_data['scheduler']].stop(
+                        _job, "User request"
+                    )
                 # Remove job file and its symlinks
                 os.unlink(os.path.join(conf.gate_path_jobs, _jid))
                 for _state, _path in conf.gate_path:
@@ -431,13 +453,21 @@ class JobManager(object):
         return False
 
     def shutdown(self):
-        pass
+        for _job in self.__jobs.values():
+            _state = _job.get_state()
+            if _state in ('done', 'failed', 'aborted', 'killed'):
+                continue
+            if _state in ('queued', 'running'):
+                _scheduler = self.schedulers[_job.valid_data['scheduler']]
+                _scheduler.stop(_job, 'Server shutdown')
+            else:
+                _job.exit('Server shutdown', state='killed')
 
     def stop(self):
-        pass
+        self.__queue_running = False
 
     def start(self):
-        pass
+        self.__queue_running = True
 
     def run(self):
         """
@@ -451,7 +481,8 @@ class JobManager(object):
 
         while(1):
             time.sleep(conf.config_sleep_time)
-            self.check_new_jobs()
+            if self.__queue_running:
+                self.check_new_jobs()
             self.check_running_jobs()
             self.check_old_jobs()
             self.check_deleted_jobs()

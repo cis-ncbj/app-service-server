@@ -66,8 +66,12 @@ class DaemonRunner(object):
 
     * 'start': Become a daemon and call `app.run()`.
     * 'stop': Exit the daemon process specified in the PID file.
+    * 'terminate' : Exit the daemon process specified in the PID file, kill all
+                    active jobs
     * 'restart': Stop, then start.
     * 'reload': Reread the configuration file.
+    * 'pause' : Stop the job queue
+    * 'run' : Restart the job queue
 
     """
 
@@ -145,7 +149,7 @@ class DaemonRunner(object):
 
         self.action = unicode(_args.action)
         if self.action not in self.action_funcs:
-            self._usage_exit(argv)
+            raise Exception("Unexpected action requested: %s" % self.action)
 
     def _start(self):
         """ Open the daemon context and run JobManager. """
@@ -263,7 +267,7 @@ class DaemonRunner(object):
     action_funcs = {
         u'start': _start,
         u'stop': _stop,
-        u'stop': _terminate,
+        u'terminate': _terminate,
         u'restart': _restart,
         u'reload': _reload,
         u'pause': _pause,
@@ -296,7 +300,6 @@ class DaemonRunner(object):
         self.job_manager.stop()
 
     def unpause(self):
-        conf.load(conf.config_file)
         self.job_manager.start()
 
     def run(self):
