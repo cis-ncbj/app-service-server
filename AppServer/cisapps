@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 
-from CISAppServer.Daemon import DaemonRunner
+from CISAppServer.JobManager import JobManager
 
 if __name__ == "__main__":
-    daemon = DaemonRunner()
-    daemon.run()
+    apps = JobManager()
+    apps.run()

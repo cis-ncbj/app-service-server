@@ -44,10 +44,6 @@ class Config(dict):
         self.config_file = None  #: Config file name
         #: Sleep interval between job status queries
         self.config_sleep_time = 1
-        #: Daemon mode pid file path
-        self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
-        #: Timeout for daemon mode pid file acquisition
-        self.daemon_pidfile_timeout = None
         self.log_level = 'INFO'  #: Logging level
         self.log_output = None  #: Log output file name
         #: Path where PBS backend will store job IDs

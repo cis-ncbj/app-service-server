@@ -346,11 +346,6 @@ class Scheduler(object):
 
             # Iterate through script files in current subdir
             for _file in _files:
-                # Skip editor buffers and recovery files
-                if _file.endswith('~'):
-                    continue
-                if _file.startswith('.') and _file.endswith('.swp'):
-                    continue
                 # Input and output file names
                 _fin_name = os.path.join(_path, _file)
                 _fou_name = os.path.join(_out_dir, _file)

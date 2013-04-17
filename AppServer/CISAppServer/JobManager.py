@@ -5,6 +5,9 @@ Main module of CISAppServer. Responsible for job management.
 """
 
 import os
+#import sys
+import argparse
+import logging
 try:
     import json
 except:
@@ -230,12 +233,42 @@ class JobManager(object):
 
     def __init__(self):
         """
-        Upon initialization stes up Validator and Sheduler interfaces.
+        Upon initialization parses command line arguments, loads options
+        from input files. Initializes Validator and Sheduler interfaces.
         """
 
-        self.init()
+        # Options parser
+        _desc = 'Daemon responsible for handling CIS Web Apps Requests.'
+        _parser = argparse.ArgumentParser(description=_desc)
+        _parser.add_argument(
+            '-c', '--config', dest='config', action='store',
+            default='CISAppServer.json', help='Configuration file.')
+        _parser.add_argument(
+            '--log', dest='log', action='store', default='DEBUG',
+            help='Logging level: VERBOSE, DEBUG, INFO, WARNING, ERROR.')
+        _parser.add_argument(
+            '--log-output', dest='log_output', action='store',
+            help='Store the logs into LOG-OUTPUT.')
+        _args = _parser.parse_args()
 
-    def init(self):
+        # Setup logging interface
+        conf.log_level = _args.log.upper()  #: Logging level to use
+        conf.log_output = _args.log_output  #: Log output file name
+        logging.addLevelName(T.VERBOSE, 'VERBOSE')
+        _log_level = getattr(logging, conf.log_level)
+        if conf.log_output:
+            logging.basicConfig(level=_log_level, filename=conf.log_output)
+        else:
+            logging.basicConfig(level=_log_level)
+
+        info("CISAppS %s" % version)
+        info("Logging level: %s" % conf.log_level)
+        info("Configuration file: %s" % _args.config)
+
+        # Load configuration from option file
+        debug('@JManager - Loading global configuration ...')
+        conf.load(_args.config)
+
         # Initialize Validator and PbsManager
         self.validator = T.Validator()  #: Validator instance
         self.schedulers = {  #: Scheduler interface instances
@@ -244,8 +277,6 @@ class JobManager(object):
 
         # Job list
         self.__jobs = {}
-
-        #TODO load existing jobs
 
     def get_job(self, job_id, create=False):
         """
@@ -386,7 +417,7 @@ class JobManager(object):
                 if _job.get_state() == 'running':
                     self.schedulers[_job.valid_data['scheduler']].stop(_job)
                 # Remove job file and its symlinks
-                os.unlink(os.path.join(conf.gate_path_jobs, _jid))
+                os.unlink(os.path.join(conf.gate.path_jobs, _jid))
                 for _state, _path in conf.gate_path:
                     _name = os.path.join(_path, _jid)
                     if os.path.exists(_name):
@@ -430,15 +461,6 @@ class JobManager(object):
 
         return False
 
-    def shutdown(self):
-        pass
-
-    def stop(self):
-        pass
-
-    def start(self):
-        pass
-
     def run(self):
         """
         Main loop of JobManager.
@@ -455,3 +477,8 @@ class JobManager(object):
             self.check_running_jobs()
             self.check_old_jobs()
             self.check_deleted_jobs()
+
+
+if __name__ == "__main__":
+    apps = JobManager()
+    apps.run()
