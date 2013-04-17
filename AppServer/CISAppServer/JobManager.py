@@ -254,6 +254,7 @@ class JobManager(object):
         # Setup logging interface
         conf.log_level = _args.log.upper()  #: Logging level to use
         conf.log_output = _args.log_output  #: Log output file name
+        logging.VERBOSE = T.VERBOSE
         logging.addLevelName(T.VERBOSE, 'VERBOSE')
         _log_level = getattr(logging, conf.log_level)
         if conf.log_output:
