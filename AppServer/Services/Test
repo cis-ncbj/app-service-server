@@ -13,5 +13,10 @@
         "type" : "string",
         "default" : "alpha",
         "values" : ["alpha", "beta", "gamma", "delta"]
+    },
+    "11_11" : {
+        "type" : "int",
+        "default" : 1,
+        "values" : [-10,10]
     }
 }
