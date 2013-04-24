@@ -5,15 +5,16 @@ Global configuration for CISAppServer.
 """
 
 import os
+import logging
 try:
     import json
 except:
     import simplejson as json
 
-from logging import \
-    debug, log
-
 VERBOSE = 5
+
+
+logger = logging.getLogger(__name__)
 
 
 class Config(dict):
@@ -47,9 +48,54 @@ class Config(dict):
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
-        self.daemon_pidfile_timeout = None
+        self.daemon_pidfile_timeout = -1
+        self.daemon_path_workdir = os.getcwd()
         self.log_level = 'INFO'  #: Logging level
-        self.log_output = None  #: Log output file name
+        self.log_output = '/tmp/CISAppServer.log'  #: Log output file name
+        self.log_level_cli = None  #: Logging level CLI override
+        self.log_output_cli = None  #: Log output file name CLI override
+        self.log_config = {
+            'version': 1,
+            'disable_existing_loggers': False,
+            'formatters': {
+                'verbose': {
+                    'format':
+                    '%(levelname)s %(asctime)s %(module)s : %(message)s',
+                    'datefmt': '%m-%d %H:%M',
+                },
+                'simple': {
+                    'format': '%(levelname)s %(message)s'
+                },
+            },
+            'handlers': {
+                'console': {
+                    'level': self.log_level,
+                    'class': 'logging.StreamHandler',
+                    'formatter': 'simple',
+                },
+                'mail': {
+                    'level': 'ERROR',
+                    'class': 'logging.handlers.SMTPHandler',
+                    'formatter': 'verbose',
+                    'mailhost': 'localhost',
+                    'fromaddr': 'kklimaszewski@cis.gov.pl',
+                    'toaddrs': 'konrad.klimaszewski@gazeta.pl',
+                    'subject': 'AppServer Error',
+                },
+                'file': {
+                    'level': self.log_level,
+                    'class': 'logging.handlers.RotatingFileHandler',
+                    'formatter': 'verbose',
+                    'filename': self.log_output,
+                    'maxBytes': 10000000,
+                    'backupCount': 5,
+                }
+            },
+            'root': {
+                'handlers': ['console', 'file', 'mail'],
+                'level': self.log_level,
+            }
+        }
         #: Path where PBS backend will store job IDs
         self.pbs_path_queue = 'PBS/Queue'
         #: Path where PBS backeng will create job working directories
@@ -106,19 +152,33 @@ class Config(dict):
 
         if conf_name is not None:
             # Load configuration from option file
-            debug("@Config - Loading global configuration: %s" % conf_name)
+            logger.debug("@Config - Loading global configuration: %s" %
+                         conf_name)
             self.config_file = conf_name
             with open(self.config_file) as _conf_file:
                 _conf = json.load(_conf_file)
-            log(VERBOSE, json.dumps(_conf))
+            logger.log(VERBOSE, json.dumps(_conf))
             self.update(_conf)
 
-        debug('@Config - Finalise configuration initialisation')
+        logger.debug('@Config - Finalise configuration initialisation')
+        # Override log levels
+        for _key in self.log_config['handlers'].keys():
+            if self.log_level_cli is not None and _key != 'mail':
+                self.log_config['handlers'][_key]['level'] = self.log_level_cli
+        self.log_config['root']['level'] = self.log_level_cli
+        if self.log_output_cli is not None and \
+           'file' in self.log_config['handlers'].keys():
+            self.log_config['handlers']['file']['filename'] = \
+                self.log_output_cli
+
         # Normalize paths to full versions
         for _key, _value in self.items():
             if '_path_' in _key and isinstance(_value, (str, unicode)):
-                log(VERBOSE,'@Config - Correct path to full one: %s -> %s.' %
-                      (_key, _value))
+                logger.log(
+                    VERBOSE,
+                    '@Config - Correct path to full one: %s -> %s.' %
+                    (_key, _value)
+                )
                 self[_key] = os.path.realpath(_value)
 
         # Generate subdir names
@@ -143,7 +203,7 @@ class Config(dict):
             "removed": self.gate_path_removed
         }
 
-        log(VERBOSE, self)
+        logger.log(VERBOSE, self)
 
 
 #: Global Config class instance. Use it to access the CISAppGateway

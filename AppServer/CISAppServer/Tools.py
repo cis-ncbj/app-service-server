@@ -13,20 +13,21 @@ import string
 import stat
 import re
 import shutil
+import logging
 #import time
 
 from subprocess import Popen, PIPE, STDOUT
-from logging import \
-    debug, info, warning, error, log
 
 from Config import conf, VERBOSE
+
+logger = logging.getLogger(__name__)
 
 
 def rmtree_error(function, path, exc_info):
     """Exception handler for shutil.rmtree()."""
 
-    error("@rmtree - Cannot remove job output: %s %s" % (function, path),
-          exc_info=exc_info)
+    logger.error("@rmtree - Cannot remove job output: %s %s" %
+                 (function, path), exc_info=exc_info)
 
 
 def verbose(msg, exc_info=False):
@@ -36,7 +37,7 @@ def verbose(msg, exc_info=False):
     VERBOSE log level is higher than DEBUG and should be used for large debug
     messages, e.g. data dumps, output from subprocesses, etc.
     """
-    log(VERBOSE, msg, exc_info=exc_info)
+    logger.log(VERBOSE, msg, exc_info=exc_info)
 
 
 class CTemplate(string.Template):
@@ -65,7 +66,7 @@ class Validator(object):
 
         # Load all files from service_conf_path. Configuration files should be
         # in JSON format.
-        debug('@Validator - Loading services configurations.')
+        logger.debug('@Validator - Loading services configurations.')
         _path = conf.service_path_conf
         _services = os.listdir(_path)
         for _service in _services:
@@ -77,7 +78,7 @@ class Validator(object):
             with open(_file_name) as _f:
                 _data = json.load(_f)
             self.services[_service] = _data
-            info("Initialized service: %s" % _service)
+            logger.info("Initialized service: %s" % _service)
         verbose(json.dumps(self.services))
 
     def validate(self, job):
@@ -109,9 +110,10 @@ class Validator(object):
         _variables = {_k: _v['default']
                       for _k, _v in self.services[_data['service']].items()}
         _variables.update({_k: _v['default']
-                      for _k, _v in self.services['default'].items()})
+                           for _k, _v in self.services['default'].items()})
 
-        #@TODO Web service should not be allowed to set values for reserved keys
+        #@TODO Web service should not be allowed to set values for reserved
+        #keys
 
         # Check that all attribute names are defined in service configuration
         # Validate values of the attributes
@@ -125,8 +127,10 @@ class Validator(object):
                     return False
                 else:
                     _variables[_k] = _v
-                    debug("@Validator - Value passed validation: %s - %s" %
-                          (_k, _v))
+                    logger.debug(
+                        "@Validator - Value passed validation: %s - %s" %
+                        (_k, _v)
+                    )
             # Check for possible reserved attribuet names like service, name,
             # date
             elif _k in conf.service_reserved_keys:
@@ -138,8 +142,10 @@ class Validator(object):
                     return False
                 else:
                     _variables[_k] = _v
-                    debug("@Validator - Value passed validation: %s - %s" %
-                          (_k, _v))
+                    logger.debug(
+                        "@Validator - Value passed validation: %s - %s" %
+                        (_k, _v)
+                    )
             else:
                 job.die("@Validator - Not supported variable: %s." % _k,
                         err=False)
@@ -165,8 +171,8 @@ class Validator(object):
         if self.services[service][key]['type'] == 'string':
             # Attribute of type string check the table of allowed values
             if not value in self.services[service][key]['values']:
-                warning("@Validator - Value not allowed: %s - %s." %
-                        (key, value))
+                logger.warning("@Validator - Value not allowed: %s - %s." %
+                               (key, value))
                 return False
         elif self.services[service][key]['type'] == 'int':
             # Attribute of type int - check the format
@@ -181,22 +187,24 @@ class Validator(object):
                 else:
                     _v = value
             except ValueError:
-                warning('@Validator - Value is not a proper int.',
-                        exc_info=True)
+                logger.warning('@Validator - Value is not a proper int.',
+                               exc_info=True)
                 return False
 
             # Check that atrribute value falls in allowed range
             try:
                 if _v < self.services[service][key]['values'][0] or \
                         _v > self.services[service][key]['values'][1]:
-                    warning(
+                    logger.warning(
                         "@Validator - Value not in allowed range: %s - %s" %
                         (key, _v)
                     )
                     return False
             except IndexError:
-                error("@Validator - Badly defined range for variable:  %s" %
-                      key)
+                logger.error(
+                    "@Validator - Badly defined range for variable:  %s" %
+                    key
+                )
                 return False
         elif self.services[service][key]['type'] == 'float':
             # Attribute of type float - check the format
@@ -211,22 +219,24 @@ class Validator(object):
                 else:
                     _v = value
             except ValueError:
-                warning('@Validator - Value is not a proper float',
-                        exc_info=True)
+                logger.warning('@Validator - Value is not a proper float',
+                               exc_info=True)
                 return False
 
             # Check that atrribute value falls in allowed range
             try:
                 if _v < self.services[service][key]['values'][0] or \
                         _v > self.services[service][key]['values'][1]:
-                    warning(
+                    logger.warning(
                         "@Validator - Value not in allowed range: %s - %s" %
                         (key, _v)
                     )
                     return False
             except IndexError:
-                error("@Validator - Badly defined range for variable:  %s" %
-                      key)
+                logger.error(
+                    "@Validator - Badly defined range for variable:  %s" %
+                    key
+                )
                 return False
 
         return True
@@ -327,11 +337,11 @@ class Scheduler(object):
                 return False
 
         # Recurse through input dir
-        debug("@Scheduler - generate scripts")
+        logger.debug("@Scheduler - generate scripts")
         for _path, _dirs, _files in os.walk(_script_dir):
             # Relative paths for subdirectories
             _sub_dir = re.sub("^%s" % _script_dir, '', _path)
-            debug("@Scheduler - Sub dir: %s" % _sub_dir)
+            logger.debug("@Scheduler - Sub dir: %s" % _sub_dir)
             if _sub_dir:
                 # Remove starting /
                 _sub_dir = _sub_dir[1:]
@@ -431,8 +441,8 @@ class PbsScheduler(Scheduler):
         try:
             _queue = os.listdir(self.queue_path)
         except:
-            error("@PBS - unable to read queue directory %s." %
-                  self.queue_path, exc_info=True)
+            logger.error("@PBS - unable to read queue directory %s." %
+                         self.queue_path, exc_info=True)
             return False
         if len(_queue) >= self.max_jobs:
             return False
@@ -448,11 +458,11 @@ class PbsScheduler(Scheduler):
 
         try:
             # Submit
-            debug("@PBS - Submitting new job")
+            logger.debug("@PBS - Submitting new job")
             _opts = ['/usr/bin/qsub', '-q', _queue,
                      '-d', _work_dir, '-j', 'oe', '-o',  _output_log,
                      '-l', 'epilogue=epilogue.sh', _run_script]
-            debug("@PBS - Running command: %s" % str(_opts))
+            logger.debug("@PBS - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()
             # Hopefully qsub returned meaningful job ID
@@ -472,7 +482,7 @@ class PbsScheduler(Scheduler):
         # Store the PBS job ID into a file
         with open(os.path.join(self.queue_path, job.id), 'w') as _jid_file:
             _jid_file.write(_jid)
-        info("Job successfully submitted: %s" % job.id)
+        logger.info("Job successfully submitted: %s" % job.id)
         return True
 
     def status(self, job):
@@ -497,12 +507,13 @@ class PbsScheduler(Scheduler):
 
         try:
             # Run qstat
-            debug("@PBS - Check job state")
+            logger.debug("@PBS - Check job state")
             _opts = ["/usr/bin/qstat", "-f", _pbs_id]
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()[0]
             if _proc.returncode == 153:
-                debug('@PBS - Job ID missing from PBS queue: done or error')
+                logger.debug(
+                    '@PBS - Job ID missing from PBS queue: done or error')
                 _done = 1
             # Check return code. If qstat was not killed by signal Popen will
             # not rise an exception
@@ -513,8 +524,8 @@ class PbsScheduler(Scheduler):
                     str(_output)
                 ))
         except:
-            error("@PBS - Unable to check job %s state." %
-                  job.id, exc_info=True)
+            logger.error("@PBS - Unable to check job %s state." %
+                         job.id, exc_info=True)
             return _status
 
         if _done == 0:
@@ -525,7 +536,7 @@ class PbsScheduler(Scheduler):
                 _m = _re.match(_line.strip())
                 if _m is not None:
                     _res = _m.group(1)
-                    debug("@PBS - Found job_state: %s" % _res)
+                    logger.debug("@PBS - Found job_state: %s" % _res)
                     try:
                         # Consider running, exiting and complete as running
                         if _res == 'R' or _res == 'C' or _res == 'E':
@@ -546,7 +557,7 @@ class PbsScheduler(Scheduler):
         # unknown
         elif os.path.isfile(os.path.join(_work_dir, 'status.dat')) or \
                 os.path.isfile(os.path.join(_work_dir, 'output.log')):
-            debug("@PBS - Found job state: D")
+            logger.debug("@PBS - Found job state: D")
             _status = 'done'
 
         return _status
@@ -559,7 +570,7 @@ class PbsScheduler(Scheduler):
         :param msg: Message that will be passed to the user
         :return: True on success and False otherwise.
         """
-        _status = True # Return value
+        _status = True  # Return value
         _pbs_id = ''
         _work_dir = os.path.join(self.work_path, job.id)
 
@@ -573,7 +584,7 @@ class PbsScheduler(Scheduler):
 
         # Run qdel
         try:
-            debug("@PBS - Killing job")
+            logger.debug("@PBS - Killing job")
             _opts = ["/usr/bin/qdel", _pbs_id]
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()[0]
@@ -618,7 +629,7 @@ class PbsScheduler(Scheduler):
         :return: True on success and False otherwise.
         """
 
-        debug("@PBS - Retrive job output: %s" % job.id)
+        logger.debug("@PBS - Retrive job output: %s" % job.id)
         _work_dir = os.path.join(self.work_path, job.id)
         _status = 0
 
@@ -642,7 +653,7 @@ class PbsScheduler(Scheduler):
             job.die("@PBS - Unable to retrive job output directory %s" %
                     _work_dir, exc_info=True)
             return False
-        info("Job %s output retrived." % job.id)
+        logger.info("Job %s output retrived." % job.id)
 
         if _status == 0:
             job.exit("%d" % _status)

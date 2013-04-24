@@ -21,20 +21,25 @@ Implementation of daemon mode for CISAppServer.
 from __future__ import absolute_import
 
 import os
+import sys
 import signal
 import errno
 import argparse
 import logging
+import logging.config
 import lockfile
+import time
 
 from daemon import pidfile, DaemonContext
 
 from logging import \
-    debug, info, warning, error
+    debug, info
 
 from .JobManager import JobManager, version
 from .Config import conf
 from . import Tools as T
+
+logger = logging.getLogger(__name__)
 
 
 class DaemonRunnerError(Exception):
@@ -81,21 +86,41 @@ class DaemonRunner(object):
         from input files. Initializes Validator and Sheduler interfaces.
         """
         self.parse_args()
-        self.job_manager = JobManager()
+
+        if self.action in ['start', 'stop', 'restart']:
+            logging.config.dictConfig(conf.log_config)
+
+        self.job_manager = None
         self.daemon_context = DaemonContext()
 
+        # Prepare PID file
         self.pidfile = None
         if conf.daemon_path_pidfile is not None:
             self.pidfile = make_pidlockfile(
                 conf.daemon_path_pidfile, conf.daemon_pidfile_timeout)
         self.daemon_context.pidfile = self.pidfile
 
+        # Set work path (by default daemon will endup in /)
+        self.daemon_context.working_directory = conf.daemon_path_workdir
+
+        # Do not close stdout and stderr in case opening daemon context throws
+        # an exception that we want to report to console
+        self.daemon_context.stdout = sys.stdout
+        self.daemon_context.stderr = sys.stderr
+
+        # Set signal handlers - they will react to action requests by user
         self.daemon_context.signal_map = {
             signal.SIGTERM: self.cleanup,
             signal.SIGHUP: self.reload_config,
             signal.SIGUSR1: self.pause,
             signal.SIGUSR2: self.unpause,
         }
+
+        # Protect log file from closing
+        for _log in logging.root.handlers:
+            if isinstance(_log, logging.StreamHandler) or \
+               isinstance(_log, logging.handlers.RotatingFileHandler):
+                self.daemon_context.files_preserve = [_log.stream.fileno()]
 
     def parse_args(self, argv=None):
         """ Parse command-line arguments. """
@@ -130,42 +155,58 @@ class DaemonRunner(object):
         _args = _parser.parse_args()
 
         # Setup logging interface
-        conf.log_level = _args.log.upper()  #: Logging level to use
-        conf.log_output = _args.log_output  #: Log output file name
+        conf.log_level_cli = _args.log.upper()  #: Logging level to use
+        conf.log_output_cli = _args.log_output  #: Log output file name
         logging.addLevelName(T.VERBOSE, 'VERBOSE')
-        _log_level = getattr(logging, conf.log_level)
-        if conf.log_output:
-            logging.basicConfig(level=_log_level, filename=conf.log_output)
-        else:
-            logging.basicConfig(level=_log_level)
+        _log_level = getattr(logging, conf.log_level_cli)
+        logging.basicConfig(
+            level=_log_level,
+            format='%(levelname)-8s %(message)s',
+        )
 
         info("CISAppS %s" % version)
         info("Logging level: %s" % conf.log_level)
         info("Configuration file: %s" % _args.config)
 
         # Load configuration from option file
-        debug('@JManager - Loading global configuration ...')
+        debug('@Daemon - Loading global configuration ...')
         conf.load(_args.config)
 
         self.action = unicode(_args.action)
         if self.action not in self.action_funcs:
-            raise Exception("Unexpected action requested: %s" % self.action)
+            raise DaemonRunnerInvalidActionError(
+                "Unexpected action requested: %s" % self.action)
 
     def _start(self):
         """ Open the daemon context and run JobManager. """
         if is_pidfile_stale(self.pidfile):
             self.pidfile.break_lock()
 
+        # Instatiate job_manager
+        self.job_manager = JobManager()
+
+        # Start daemon context
         try:
             self.daemon_context.open()
         except lockfile.AlreadyLocked:
+            # TODO output somehow to the console?
             raise DaemonRunnerStartFailureError(
                 u"PID file %r already locked" % self.pidfile.path)
 
-        pid = os.getpid()
-        info("CISAppServer started with pid %d" % pid)
+        # Catch exceptions and log them otherwise we will not see what happened
+        try:
+            pid = os.getpid()
+            # info("CISAppServer started with pid %d" % pid)
+            logger.info("CISAppServer started with pid %d" % pid)
+            # Disable console logging
+            _h = logging.root.handlers[0]
+            logging.root.removeHandler(_h)
 
-        self.job_manager.run()
+            self.job_manager.run()
+        except Exception, e:
+            logger.error(u"@Daemon - Shutdown, exception cought: %s" % e)
+            logging.shutdown()
+            sys.exit(1)
 
     def _terminate_daemon_process(self):
         """
@@ -223,6 +264,7 @@ class DaemonRunner(object):
     def _restart(self):
         """ Stop, then start. """
         self._stop()
+        time.sleep(1)
         self._start()
 
     def _reload(self):
@@ -288,22 +330,31 @@ class DaemonRunner(object):
                 u"Unknown action: %r" % self.action)
         return func
 
-    def cleanup(self):
+    def cleanup(self, signum, frame):
+        logger.info("Received terminate command")
         self.job_manager.shutdown()
-        os.exit(0)
+        logger.info("Shutdown")
+        logging.shutdown()
+        sys.exit(0)
 
-    def reload_config(self):
+    def reload_config(self, signum, frame):
+        logger.info("Received reload command")
+        logger.debug("PWD: %s" % os.getcwd())
         conf.load(conf.config_file)
         self.job_manager.init()
+        logger.info("Reload complete")
 
-    def pause(self):
+    def pause(self, signum, frame):
+        logger.info("Received pause command")
         self.job_manager.stop()
 
-    def unpause(self):
+    def unpause(self, signum, frame):
+        logger.info("Received run command")
         self.job_manager.start()
 
     def run(self):
         """ Perform the requested action. """
+        logger.info("Executing %s" % self.action)
         func = self._get_action_func()
         func(self)
 
