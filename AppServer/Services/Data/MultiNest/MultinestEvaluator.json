@@ -1,0 +1,12 @@
+{
+    "nodes_min" : @@{nodes_min},
+    "nodes_max" : @@{nodes_max},
+    "xsize" : @@{xsize},
+    "ysize" : @@{ysize},
+    "sigma_min" : @@{sigma_min},
+    "sigma_max" : @@{sigma_max},
+    "sampling_efficiency" : @@{sampling_efficiency},
+    "n_live_points" : @@{n_live_points},
+    "evidence_tolerance" : @@{evidence_tolerance},
+    "max_modes" : @@{max_modes}
+}
