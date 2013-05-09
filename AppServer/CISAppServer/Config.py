@@ -44,16 +44,20 @@ class Config(dict):
         # Define default values
         self.config_file = None  #: Config file name
         #: Sleep interval between job status queries
-        self.config_sleep_time = 1
+        self.config_sleep_time = 3
+        #: Every n-th status query dump the progress logs
+        self.config_progress_step = 2
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
         self.daemon_pidfile_timeout = -1
+        #: Working directory of daemon
         self.daemon_path_workdir = os.getcwd()
         self.log_level = 'INFO'  #: Logging level
         self.log_output = '/tmp/CISAppServer.log'  #: Log output file name
         self.log_level_cli = None  #: Logging level CLI override
         self.log_output_cli = None  #: Log output file name CLI override
+        #: Configuration of logging module
         self.log_config = {
             'version': 1,
             'disable_existing_loggers': False,
@@ -120,16 +124,30 @@ class Config(dict):
         self.gate_path_shared = 'Shared'
         #: Path where jobs output will be stored
         self.gate_path_output = 'Output'
+        #: Path where jobs output is moved before removal (aleviates problems
+        #  with files that are still in use)
+        self.gate_path_dump = 'Dump'
+        #: Path were jobs description is stored
         self.gate_path_jobs = None
+        #: Path were jobs exit status is stored
         self.gate_path_exit = None
+        #: Path were where waiting jobs are symlinked
         self.gate_path_waiting = None
+        #: Path were where queued jobs are symlinked
         self.gate_path_queued = None
+        #: Path were where running jobs are symlinked
         self.gate_path_running = None
+        #: Path were where done jobs are symlinked
         self.gate_path_done = None
+        #: Path were where failed jobs are symlinked
         self.gate_path_failed = None
+        #: Path were where aborted jobs are symlinked
         self.gate_path_aborted = None
+        #: Path were where killed jobs are symlinked
         self.gate_path_killed = None
+        #: Path were where jobs shceduled for removal are symlinked
         self.gate_path_removed = None
+        #: Dictionary of job states with corresponding paths
         self.gate_path = {
             "waiting": None,
             "queued": None,

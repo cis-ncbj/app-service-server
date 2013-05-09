@@ -251,6 +251,10 @@ class Scheduler(object):
     Allows for job submission, deletion and extraction of job status.
     """
 
+    # We do not want to output progress with every status check. To lighten the
+    # burden lets do it every n-th step
+    __progress_step = 0
+
     def __init__(self):
         #: Working directory path
         self.work_path = None
@@ -279,7 +283,27 @@ class Scheduler(object):
 
         Returns one of "waiting", "running", "done", "unknown".
         """
-        raise NotImplementedError
+        # Output job progress log if it exists
+        # The progres log is extraced every n-th status check
+        if Scheduler.__progress_step >= conf.config_progress_step:
+            logger.debug('@Scheduler - Extracting progress log')
+            _work_dir = os.path.join(self.work_path, job.id)
+            _output_dir = os.path.join(conf.gate_path_output, job.id)
+            _progress_file = os.path.join(_work_dir, 'progress.log')
+            if os.path.exists(_progress_file):
+                try:
+                    if not os.path.isdir(_output_dir):
+                        os.mkdir(_output_dir)
+                    shutil.copy(_progress_file, _output_dir)
+                    logger.debug('@Scheduler - Progress log extracted')
+                except:
+                    logger.error(
+                        '@Scheduler - Cannot copy progress.log',
+                        exc_info=True
+                    )
+            Scheduler.__progress_step = 0
+        else:
+            Scheduler.__progress_step += 1
 
     def stop(self, job):
         """Stop running job and remove it from execution queue."""
@@ -494,6 +518,8 @@ class PbsScheduler(Scheduler):
         Returns one of "waiting", "running", "done", "unknown".
         """
 
+        super(PbsScheduler, self).status(job)
+
         _done = 0
         _status = 'unknown'
         _pbs_id = ''
@@ -646,8 +672,16 @@ class PbsScheduler(Scheduler):
 
         try:
             os.unlink(os.path.join(self.queue_path, job.id))
-            # Output dir should not exist. For now there is no case where this
-            # would happen ...
+            # Remove output dir if it exists.
+            _out_dir = os.path.join(conf.gate_path_output, job.id)
+            _dump_dir = os.path.join(conf.gate_path_dump, job.id)
+            if os.path.isdir(_out_dir):
+                logger.debug('@PBS - Remove existing output directory')
+                # out and dump should be on the same partition so that rename
+                # is used. This will make sure that processes reading from out
+                # will not cause rmtree to throw exceptions
+                shutil.move(_out_dir, _dump_dir) 
+                shutil.rmtree(_dump_dir, ignore_errors=True)
             shutil.move(_work_dir, conf.gate_path_output)
         except:
             job.die("@PBS - Unable to retrive job output directory %s" %
