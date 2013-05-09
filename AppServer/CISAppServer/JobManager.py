@@ -5,23 +5,21 @@ Main module of CISAppServer. Responsible for job management.
 """
 
 import os
-#import sys
-import argparse
-import logging
 try:
     import json
 except:
     import simplejson as json
 import shutil
 import time
-
-from logging import \
-    debug, info, warning, error
+import logging
 
 import Tools as T
 from Config import conf
 
 version = "0.2"
+
+
+logger = logging.getLogger(__name__)
 
 
 class Job(object):
@@ -56,8 +54,8 @@ class Job(object):
             _name = os.path.join(conf.gate_path_jobs, self.id)
             with open(_name) as _f:
                 self.data = json.load(_f)
-            debug('@Job - Loaded data file %s.' % self.id)
-            debug(self.data)
+            logger.debug('@Job - Loaded data file %s.' % self.id)
+            logger.debug(self.data)
         except:
             self.die("@Job - Cannot load data file %s." % _name, exc_info=True)
             return None
@@ -105,7 +103,7 @@ class Job(object):
         :param new_state: new sate for the job. For valid states see
             :py:meth:`get_state`.
         """
-        debug("@Job - Set new state: %s" % new_state)
+        logger.debug("@Job - Set new state: %s" % new_state)
 
         if new_state not in conf.service_states:
             raise Exception('Unknown job state %s.' % new_state)
@@ -147,9 +145,9 @@ class Job(object):
 
         self.exit(message, 'aborted')
         if err:
-            error(message, exc_info=exc_info)
+            logger.error(message, exc_info=exc_info)
         else:
-            warning(message, exc_info=exc_info)
+            logger.warning(message, exc_info=exc_info)
 
     def exit(self, message, state='done'):
         """
@@ -188,10 +186,10 @@ class Job(object):
             with open(_name, 'a') as _f:
                 _f.write(message)
         except:
-            error("@Job - Cannot write to status file %s." % _name,
-                  exc_info=True)
+            logger.error("@Job - Cannot write to status file %s." % _name,
+                         exc_info=True)
 
-        info("Job %s finished: %s" % (self.id, state))
+        logger.info("Job %s finished: %s" % (self.id, state))
 
     def __check_state(self):
         """
@@ -233,43 +231,17 @@ class JobManager(object):
 
     def __init__(self):
         """
-        Upon initialization parses command line arguments, loads options
-        from input files. Initializes Validator and Sheduler interfaces.
+        Upon initialization stes up Validator and Sheduler interfaces.
         """
+        self.init()
 
-        # Options parser
-        _desc = 'Daemon responsible for handling CIS Web Apps Requests.'
-        _parser = argparse.ArgumentParser(description=_desc)
-        _parser.add_argument(
-            '-c', '--config', dest='config', action='store',
-            default='CISAppServer.json', help='Configuration file.')
-        _parser.add_argument(
-            '--log', dest='log', action='store', default='DEBUG',
-            help='Logging level: VERBOSE, DEBUG, INFO, WARNING, ERROR.')
-        _parser.add_argument(
-            '--log-output', dest='log_output', action='store',
-            help='Store the logs into LOG-OUTPUT.')
-        _args = _parser.parse_args()
+    def init(self):
+        """
+        Initialize JobManager. Creates new instaces of Validator and
+        Schedulers. Loads existing jobs from file system.
 
-        # Setup logging interface
-        conf.log_level = _args.log.upper()  #: Logging level to use
-        conf.log_output = _args.log_output  #: Log output file name
-        logging.VERBOSE = T.VERBOSE
-        logging.addLevelName(T.VERBOSE, 'VERBOSE')
-        _log_level = getattr(logging, conf.log_level)
-        if conf.log_output:
-            logging.basicConfig(level=_log_level, filename=conf.log_output)
-        else:
-            logging.basicConfig(level=_log_level)
-
-        info("CISAppS %s" % version)
-        info("Logging level: %s" % conf.log_level)
-        info("Configuration file: %s" % _args.config)
-
-        # Load configuration from option file
-        debug('@JManager - Loading global configuration ...')
-        conf.load(_args.config)
-
+        Existing state is purged.
+        """
         # Initialize Validator and PbsManager
         self.validator = T.Validator()  #: Validator instance
         self.schedulers = {  #: Scheduler interface instances
@@ -278,6 +250,25 @@ class JobManager(object):
 
         # Job list
         self.__jobs = {}
+        # State of the job queue
+        self.__queue_running = True
+
+        # Load existing jobs
+        _list = os.listdir(conf.gate_path_jobs)
+        for _jid in _list:
+            logger.debug('@JManager - Detected active job %s.' % _jid)
+
+            # Create new job instance
+            _job = Job(_jid)
+            if _job is None:
+                continue
+
+            if _jid in self.__jobs.keys():
+                _job.die("@JManager - Job ID already used: %s" % _jid)
+
+            self.__jobs[_jid] = _job
+            # Make sure Job.valid_data is present
+            self.validator.validate(_job)
 
     def get_job(self, job_id, create=False):
         """
@@ -292,8 +283,8 @@ class JobManager(object):
 
         # Handle zombies
         if job_id not in self.__jobs.keys():
-            error('@JManager - Job %s is missing from '
-                  'overall job list.' % job_id)
+            logger.error('@JManager - Job %s is missing from '
+                         'overall job list.' % job_id)
             if create:
                 _job = Job(job_id)
                 self.__jobs[job_id] = _job
@@ -314,12 +305,12 @@ class JobManager(object):
         try:
             _queue = os.listdir(conf.gate_path_waiting)
         except:
-            error("@JManager - Unable to read waiting queue %s" %
-                  conf.gate_path_waiting, exc_info=True)
+            logger.error("@JManager - Unable to read waiting queue %s" %
+                         conf.gate_path_waiting, exc_info=True)
             return
 
         for _jid in _queue:
-            debug('@JManager - Detected new job %s.' % _jid)
+            logger.debug('@JManager - Detected new job %s.' % _jid)
 
             # Create ne job instance
             _job = Job(_jid)
@@ -334,12 +325,9 @@ class JobManager(object):
                 self.__jobs[_jid] = _job
                 if self.submit(_job):
                     _job.set_state('queued')
-                else:
-                    # Assume that the error was during parsing of input data.
-                    # If it was otherwise lower level routines should have
-                    # issued and ERROR already.
-                    _job.die("@JManager - Cannot start job %s." % _jid,
-                             err=False)
+                # Submit can return False when queue is full. Do not terminate
+                # job here so it can be resubmitted next time. If submission
+                # failed scheduler should have set job state to Aborted anyway.
             except:
                 _job.die("@JManager - Cannot start job %s." % _jid,
                          exc_info=True)
@@ -353,14 +341,17 @@ class JobManager(object):
 
         # Loop over supported schedulers
         for _sname, _scheduler in self.schedulers.items():
-            # Check the "queue_path" for files with scheduler IDs. This
+            # check the "queue_path" for files with scheduler ids. this
             # directory should only be accessible inside of the firewall so it
             # should be safe from corruption by clients.
             try:
                 _queue = os.listdir(_scheduler.queue_path)
             except:
-                error("@JManager - Unable to read %s queue directory %s." %
-                      (_sname, _scheduler.queue_path), exc_info=True)
+                logger.error(
+                    "@jmanager - unable to read %s queue directory %s." %
+                    (_sname, _scheduler.queue_path),
+                    exc_info=True
+                )
                 continue
 
             for _jid in _queue:
@@ -368,24 +359,29 @@ class JobManager(object):
                 _job = self.get_job(_jid)
                 # Handle zombies
                 if _job is None:
-                    error('@JManager - Job %s in %s queue is missing from '
-                          'overall job list.' % (_jid, _sname))
+                    logger.error(
+                        '@JManager - Job %s in %s queue is missing from '
+                        'overall job list.' % (_jid, _sname)
+                    )
                     try:
                         os.unlink(os.path.join(_scheduler.queue_path, _jid))
                     except:
-                        error('@JManager - Unable to remove dangling job ID '
-                              '%s from %s queue.' % (_jid, _sname))
+                        logger.error(
+                            '@JManager - Unable to remove dangling job ID '
+                            '%s from %s queue.' % (_jid, _sname)
+                        )
                     continue
 
                 # Get Job status
                 _status = _scheduler.status(_job)
                 if _status == 'done':
                     # Found finished job - finalise it
-                    debug('@JManager - Detected finished job: %s.' % _jid)
+                    logger.debug('@JManager - Detected finished job: %s.' %
+                                 _jid)
                     if not _scheduler.finalise(_job):
                         _job.die("Cannot finalise job %s." % _jid)
                 elif _status == 'unknown':
-                    warning(
+                    logger.warning(
                         "@JManager - Scheduler returned 'unknown' status "
                         "for job %s" % _jid
                     )
@@ -402,12 +398,13 @@ class JobManager(object):
         try:
             _queue = os.listdir(conf.gate_path_removed)
         except:
-            error("@JManager - Unable to read delete queue: %s." %
-                  conf.gate_path_removed, exc_info=True)
+            logger.error("@JManager - Unable to read delete queue: %s." %
+                         conf.gate_path_removed, exc_info=True)
             return
 
         for _jid in _queue:
-            debug('@JManager - Detected job marked for deletion: %s' % _jid)
+            logger.debug('@JManager - Detected job marked for deletion: %s' %
+                         _jid)
 
             _job = self.get_job(_jid, create=True)
             if _job is None:
@@ -416,9 +413,11 @@ class JobManager(object):
             try:
                 # Stop if it is running
                 if _job.get_state() == 'running':
-                    self.schedulers[_job.valid_data['scheduler']].stop(_job)
+                    self.schedulers[_job.valid_data['scheduler']].stop(
+                        _job, "User request"
+                    )
                 # Remove job file and its symlinks
-                os.unlink(os.path.join(conf.gate.path_jobs, _jid))
+                os.unlink(os.path.join(conf.gate_path_jobs, _jid))
                 for _state, _path in conf.gate_path:
                     _name = os.path.join(_path, _jid)
                     if os.path.exists(_name):
@@ -428,7 +427,7 @@ class JobManager(object):
                 if os.path.exists(_name):
                     os.unlink(_name)
             except:
-                error("Cannot remove job %s." % _jid, exc_info=True)
+                logger.error("Cannot remove job %s." % _jid, exc_info=True)
 
             # Remove the output directory and its contents
             _output = os.path.join(conf.gate_path_output, _jid)
@@ -462,6 +461,23 @@ class JobManager(object):
 
         return False
 
+    def shutdown(self):
+        for _job in self.__jobs.values():
+            _state = _job.get_state()
+            if _state in ('done', 'failed', 'aborted', 'killed'):
+                continue
+            if _state in ('queued', 'running'):
+                _scheduler = self.schedulers[_job.valid_data['scheduler']]
+                _scheduler.stop(_job, 'Server shutdown')
+            else:
+                _job.exit('Server shutdown', state='killed')
+
+    def stop(self):
+        self.__queue_running = False
+
+    def start(self):
+        self.__queue_running = True
+
     def run(self):
         """
         Main loop of JobManager.
@@ -474,12 +490,8 @@ class JobManager(object):
 
         while(1):
             time.sleep(conf.config_sleep_time)
-            self.check_new_jobs()
+            if self.__queue_running:
+                self.check_new_jobs()
             self.check_running_jobs()
             self.check_old_jobs()
             self.check_deleted_jobs()
-
-
-if __name__ == "__main__":
-    apps = JobManager()
-    apps.run()
