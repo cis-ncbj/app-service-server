@@ -47,6 +47,10 @@ class Config(dict):
         self.config_sleep_time = 3
         #: Every n-th status query dump the progress logs
         self.config_progress_step = 2
+        #: Interval in hours after which job is automatically removed with all data
+        self.config_delete_interval = 48
+        #: Interval in hours after which job is automatically killed if in running state
+        self.config_kill_interval = 24
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
@@ -65,7 +69,7 @@ class Config(dict):
                 'verbose': {
                     'format':
                     '%(levelname)s %(asctime)s %(module)s : %(message)s',
-                    'datefmt': '%m-%d %H:%M',
+                    'datefmt': '%m-%d %H:%M:%S',
                 },
                 'simple': {
                     'format': '%(levelname)s %(message)s'

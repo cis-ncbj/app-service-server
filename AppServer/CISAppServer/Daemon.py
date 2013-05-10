@@ -157,6 +157,7 @@ class DaemonRunner(object):
         # Setup logging interface
         conf.log_level_cli = _args.log.upper()  #: Logging level to use
         conf.log_output_cli = _args.log_output  #: Log output file name
+        logging.VERBOSE = T.VERBOSE
         logging.addLevelName(T.VERBOSE, 'VERBOSE')
         _log_level = getattr(logging, conf.log_level_cli)
         logging.basicConfig(

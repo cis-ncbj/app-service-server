@@ -1,5 +1,5 @@
 {
-    "config_sleep_time" : 1,
+    "config_sleep_time" : 3,
     "service_path_conf" : "Services",
     "service_path_data" : "Services/Data",
     "gate_path_shared" : "Queue",

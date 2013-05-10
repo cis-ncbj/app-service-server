@@ -12,6 +12,7 @@ except:
 import shutil
 import time
 import logging
+from datetime import datetime, timedelta
 
 import Tools as T
 from Config import conf
@@ -225,10 +226,6 @@ class JobManager(object):
     Main calss of CISAppServer. It is responsible for job management.
     """
 
-    #TODO daemon mode
-    #TODO on the fly configuration reload
-    #TODO queue stop (do not accept new jobs)
-
     def __init__(self):
         """
         Upon initialization stes up Validator and Sheduler interfaces.
@@ -416,12 +413,14 @@ class JobManager(object):
                     self.schedulers[_job.valid_data['scheduler']].stop(
                         _job, "User request"
                     )
-                # Remove job file and its symlinks
-                os.unlink(os.path.join(conf.gate_path_jobs, _jid))
-                for _state, _path in conf.gate_path:
+                # Remove job symlinks
+                for _state, _path in conf.gate_path.items():
                     _name = os.path.join(_path, _jid)
                     if os.path.exists(_name):
                         os.unlink(_name)
+                # Remove job file after symlinks (otherwise os.path.exists
+                # fails on symlinks)
+                os.unlink(os.path.join(conf.gate_path_jobs, _jid))
                 # Remove output status file
                 _name = os.path.join(conf.gate_path_exit, _jid)
                 if os.path.exists(_name):
@@ -431,17 +430,60 @@ class JobManager(object):
 
             # Remove the output directory and its contents
             _output = os.path.join(conf.gate_path_output, _jid)
+            _dump = os.path.join(conf.gate_path_dump, _jid)
             if os.path.isdir(_output):
-                shutil.rmtree(_output, onerror=T.rmtree_error)
+                shutil.move(_output, _dump) 
+                shutil.rmtree(_dump, onerror=T.rmtree_error)
 
             # Remove job from the list
             del self.__jobs[_jid]
+            logger.info('@JManager - Job %s removed with all data.' %
+                         _jid)
 
     def check_old_jobs(self):
         """Check for jobs that exceed their life time.
 
         If found mark them for removal. [Not Implemented]"""
-        pass
+
+        try:
+            _queue = os.listdir(conf.gate_path_jobs)
+        except:
+            logger.error("@JManager - Unable to read job queue: %s." %
+                         conf.gate_path_jobs, exc_info=True)
+            return
+
+        for _jid in _queue:
+            _job = self.get_job(_jid, create=True)
+            if _job is None:
+                continue
+
+            _state = _job.get_state()
+            _now = datetime.now()
+            _dt = timedelta(hours=conf.config_delete_interval)
+            _path = None
+            try:
+                if _state in ['aborted', 'killed']:
+                    _path = os.path.join(conf.gate_path_jobs, _jid)
+                elif _state in ['done', 'failed']:
+                    _path = os.path.join(conf.gate_path_output, _jid)
+                elif _state == 'running':
+                    _path = os.path.join(conf.gate_path_running, _jid)
+                    _dt = timedelta(hours=conf.config_kill_interval)
+                else:
+                    return
+
+                _path_time = datetime.fromtimestamp(os.path.getctime(_path))
+                _path_time += _dt
+            except:
+                logger.error(
+                    "@JManager - Unable to extract job change time: %s." %
+                    _jid, exc_info=True)
+                return
+
+            if _path_time < _now:
+                logger.info("@JManager - Job reached storage time limit. "
+                            "Sheduling for removal.")
+                _job.set_state('removed')
 
     def submit(self, job):
         """
