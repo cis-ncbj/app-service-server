@@ -109,7 +109,7 @@ class Config(dict):
         self.pbs_path_queue = 'PBS/Queue'
         #: Path where PBS backeng will create job working directories
         self.pbs_path_work = 'PBS/Scratch'
-        self.pbs_default_queue = 'default'  #: Name of default PBS queue
+        self.pbs_default_queue = 'short'  #: Name of default PBS queue
         self.pbs_max_jobs = 100  #: Maximum number of concurent PBS jobs
         #: Path with services configuration files
         self.service_path_conf = 'Services'
@@ -120,7 +120,6 @@ class Config(dict):
         self.service_states = (
             'waiting', 'queued', 'running',
             'done', 'failed', 'aborted', 'killed',
-            'removed'
         )
         #: Reserved key names for job parameters
         self.service_reserved_keys = ('service', 'name', 'scheduler', 'queue')
@@ -136,6 +135,8 @@ class Config(dict):
         self.gate_path_jobs = None
         #: Path were jobs exit status is stored
         self.gate_path_exit = None
+        #: Path were where jobs shceduled for removal are symlinked
+        self.gate_path_delete = None
         #: Path were where waiting jobs are symlinked
         self.gate_path_waiting = None
         #: Path were where queued jobs are symlinked
@@ -150,8 +151,6 @@ class Config(dict):
         self.gate_path_aborted = None
         #: Path were where killed jobs are symlinked
         self.gate_path_killed = None
-        #: Path were where jobs shceduled for removal are symlinked
-        self.gate_path_removed = None
         #: Dictionary of job states with corresponding paths
         self.gate_path = {
             "waiting": None,
@@ -161,7 +160,6 @@ class Config(dict):
             "failed": None,
             "aborted": None,
             "killed": None,
-            "removed": None
         }
 
     def load(self, conf_name=None):
@@ -207,6 +205,9 @@ class Config(dict):
         # Generate subdir names
         self.gate_path_jobs = os.path.join(self.gate_path_shared, 'jobs')
         self.gate_path_exit = os.path.join(self.gate_path_shared, 'exit')
+        self.gate_path_delete = os.path.join(self.gate_path_shared, 'delete')
+
+        # Generate job state subdirs
         self.gate_path_waiting = os.path.join(self.gate_path_shared, 'waiting')
         self.gate_path_queued = os.path.join(self.gate_path_shared, 'queued')
         self.gate_path_running = os.path.join(self.gate_path_shared, 'running')
@@ -214,7 +215,6 @@ class Config(dict):
         self.gate_path_failed = os.path.join(self.gate_path_shared, 'failed')
         self.gate_path_aborted = os.path.join(self.gate_path_shared, 'aborted')
         self.gate_path_killed = os.path.join(self.gate_path_shared, 'killed')
-        self.gate_path_removed = os.path.join(self.gate_path_shared, 'removed')
         self.gate_path = {
             "waiting": self.gate_path_waiting,
             "queued": self.gate_path_queued,
@@ -223,8 +223,30 @@ class Config(dict):
             "failed": self.gate_path_failed,
             "aborted": self.gate_path_aborted,
             "killed": self.gate_path_killed,
-            "removed": self.gate_path_removed
         }
+
+        # Create those paths if they do not exist
+        _mkdirs = [
+            "daemon_path_workdir",
+            "pbs_path_queue",
+            "pbs_path_work",
+            "gate_path_shared",
+            "gate_path_output",
+            "gate_path_dump",
+            "gate_path_jobs",
+            "gate_path_exit",
+            "gate_path_delete",
+            "gate_path_waiting",
+            "gate_path_queued",
+            "gate_path_running",
+            "gate_path_done",
+            "gate_path_failed",
+            "gate_path_aborted",
+            "gate_path_killed",
+        ]
+        for _path in _mkdirs:
+            if not os.path.isdir(self[_path]):
+                os.mkdir(self[_path])
 
         logger.log(VERBOSE, self)
 

@@ -88,12 +88,7 @@ class Job(object):
             postprocessing,
         * killed:
             job execution was stopped by an user,
-        * removed:
-            job is scheduled for removal.
         """
-
-        if os.path.exists(os.path.join(conf.gate_path_removed, self.id)):
-            self.__state = 'removed'
 
         return self.__state
 
@@ -110,8 +105,6 @@ class Job(object):
             raise Exception('Unknown job state %s.' % new_state)
 
         self.get_state()
-        if self.__state == 'removed':
-            return
 
         if self.__state == new_state:
             return
@@ -124,7 +117,7 @@ class Job(object):
 
         # Remove all other possible states just in case we previously failed
         for _state in conf.service_states:
-            if _state != new_state and _state != 'removed':
+            if _state != new_state:
                 _name = os.path.join(conf.gate_path[_state], self.id)
                 if os.path.exists(_name):
                     os.unlink(_name)
@@ -177,7 +170,7 @@ class Job(object):
             state = 'aborted'
 
         # Prepend the state prefix to status message
-        message = _states[state] + message
+        message = _states[state] + message + '\n'
         _name = os.path.join(conf.gate_path_exit, self.id)
         # Generate the output status file
         try:
@@ -192,6 +185,24 @@ class Job(object):
 
         logger.info("Job %s finished: %s" % (self.id, state))
 
+    def delete(self):
+        """
+        Mark job for removal.
+
+        Active jobs will be killed. All data files including output files will
+        be removed.
+        """
+
+        try:
+            # Mark new state in the shared file system
+            os.symlink(
+                os.path.join(conf.gate_path_jobs, self.id),
+                os.path.join(conf.gate_path_delete, self.id)
+            )
+        except:
+            logger.error("@Job - Cannot mark job %s for removal." % _name,
+                         exc_info=True)
+
     def __check_state(self):
         """
         Query the shared storage to identify current job state.
@@ -200,12 +211,8 @@ class Job(object):
         restarting AppServer after shutdown with already running jobs this will
         allow to reload them.
         """
-        if self.__state == 'removed':
-            return
 
-        if os.path.exists(os.path.join(conf.gate_path_removed, self.id)):
-            self.__state = 'removed'
-        elif os.path.exists(os.path.join(conf.gate_path_aborted, self.id)):
+        if os.path.exists(os.path.join(conf.gate_path_aborted, self.id)):
             self.__state = 'aborted'
         elif os.path.exists(os.path.join(conf.gate_path_killed, self.id)):
             self.__state = 'killed'
@@ -371,12 +378,11 @@ class JobManager(object):
 
                 # Get Job status
                 _status = _scheduler.status(_job)
-                if _status == 'done':
+                if _status == 'done' or _status == 'killed':
                     # Found finished job - finalise it
                     logger.debug('@JManager - Detected finished job: %s.' %
                                  _jid)
-                    if not _scheduler.finalise(_job):
-                        _job.die("Cannot finalise job %s." % _jid)
+                    _scheduler.finalise(_job)
                 elif _status == 'unknown':
                     logger.warning(
                         "@JManager - Scheduler returned 'unknown' status "
@@ -393,10 +399,10 @@ class JobManager(object):
 
         # Symlinks in "delete" dir mark jobs for removal
         try:
-            _queue = os.listdir(conf.gate_path_removed)
+            _queue = os.listdir(conf.gate_path_delete)
         except:
             logger.error("@JManager - Unable to read delete queue: %s." %
-                         conf.gate_path_removed, exc_info=True)
+                         conf.gate_path_delete, exc_info=True)
             return
 
         for _jid in _queue:
@@ -419,6 +425,7 @@ class JobManager(object):
                     _name = os.path.join(_path, _jid)
                     if os.path.exists(_name):
                         os.unlink(_name)
+                os.unlink(os.path.join(conf.gate_path_delete, _jid))
                 # Remove job file after symlinks (otherwise os.path.exists
                 # fails on symlinks)
                 os.unlink(os.path.join(conf.gate_path_jobs, _jid))
@@ -432,9 +439,13 @@ class JobManager(object):
             # Remove the output directory and its contents
             _output = os.path.join(conf.gate_path_output, _jid)
             _dump = os.path.join(conf.gate_path_dump, _jid)
-            if os.path.isdir(_output):
-                shutil.move(_output, _dump) 
-                shutil.rmtree(_dump, onerror=T.rmtree_error)
+            try:
+                if os.path.isdir(_output):
+                    shutil.move(_output, _dump) 
+                    shutil.rmtree(_dump, onerror=T.rmtree_error)
+            except:
+                logger.error("Cannot remove job output %s." % _jid,
+                             exc_info=True)
 
             # Remove job from the list
             del self.__jobs[_jid]
@@ -484,7 +495,7 @@ class JobManager(object):
             if _path_time < _now:
                 logger.info("@JManager - Job reached storage time limit. "
                             "Sheduling for removal.")
-                _job.set_state('removed')
+                _job.delete()
 
     def submit(self, job):
         """

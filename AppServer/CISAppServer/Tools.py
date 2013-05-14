@@ -578,13 +578,12 @@ class PbsScheduler(Scheduler):
                         return 'unknown'
 
         # When job is finished either epilogue was executed and status.dat is
-        # present or at least output.log should be present - set as done.
-        # Otherwise we are facing communication problems with PBS leave it as
-        # unknown
-        elif os.path.isfile(os.path.join(_work_dir, 'status.dat')) or \
-                os.path.isfile(os.path.join(_work_dir, 'output.log')):
+        # present. Otherwise assume it was killed
+        elif os.path.isfile(os.path.join(_work_dir, 'status.dat')):
             logger.debug("@PBS - Found job state: D")
             _status = 'done'
+        else:
+            _status = 'killed'
 
         return _status
 
@@ -657,16 +656,19 @@ class PbsScheduler(Scheduler):
 
         logger.debug("@PBS - Retrive job output: %s" % job.id)
         _work_dir = os.path.join(self.work_path, job.id)
-        _status = 0
+        _job_state = 'abort' # Job state
+        _status = 0 # Job exit status
 
         # Get job output code
         try:
             with open(os.path.join(_work_dir, 'status.dat')) as _status_file:
                 _status = int(_status_file.readline().strip())
+                _job_state = 'done'
         except:
-            job.die("@PBS - Unable to extract job exit code: %s. "
-                    "Will continue with output extraction" % job.id,
-                    exc_info=True)
+            _job_state = 'killed'
+            logger.warning("@PBS - Unable to extract job exit code: %s. "
+                           "Will continue with output extraction" % job.id,
+                           exc_info=True)
             # Although there is no output code job might finished only epilogue
             # failed. Let the extraction finish.
 
@@ -683,15 +685,21 @@ class PbsScheduler(Scheduler):
                 shutil.move(_out_dir, _dump_dir) 
                 shutil.rmtree(_dump_dir, ignore_errors=True)
             shutil.move(_work_dir, conf.gate_path_output)
+            logger.info("Job %s output retrived." % job.id)
         except:
-            job.die("@PBS - Unable to retrive job output directory %s" %
-                    _work_dir, exc_info=True)
-            return False
-        logger.info("Job %s output retrived." % job.id)
+            _job_state = 'abort'
+            logger.error("@PBS - Unable to retrive job output directory %s" %
+                         _work_dir, exc_info=True)
 
-        if _status == 0:
-            job.exit("%d" % _status)
+        if _job_state == 'killed':
+            job.exit("", state='killed')
+        elif _job_state == 'done':
+            if _status == 0:
+                job.exit("%d" % _status)
+            else:
+                job.exit("%d" % _status, state='failed')
         else:
-            job.exit("%d" % _status, state='failed')
+            job.die("@PBS - Unable to finalise job %s." % job.id)
+            return False
 
         return True
