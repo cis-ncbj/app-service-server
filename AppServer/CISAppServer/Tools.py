@@ -76,7 +76,7 @@ class Validator(object):
             if not os.path.isfile(_file_name):
                 continue
             with open(_file_name) as _f:
-                _data = json.load(_f)
+                _data = conf.json_load(_f)
             self.services[_service] = _data
             logger.info("Initialized service: %s" % _service)
         verbose(json.dumps(self.services))
