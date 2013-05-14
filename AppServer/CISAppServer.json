@@ -56,8 +56,8 @@
     // relative to Daemon working directory (default: PBS/Scratch)
     //"pbs_path_work" : "PBS/Scratch",
     //
-    // Name of default PBS queue (default: default)
-    //"pbs_default_queue" : "default",
+    // Name of default PBS queue (default: short)
+    //"pbs_default_queue" : "short",
     //
     // Maximum number of concurent PBS jobs (default: 100)
     //"pbs_max_jobs" : 100,
