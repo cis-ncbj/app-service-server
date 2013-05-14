@@ -228,7 +228,7 @@ class Config(dict):
 
         logger.log(VERBOSE, self)
 
-    def json_load(self, filename):
+    def json_load(self, file):
         """ Parse a JSON file
             First remove comments and then use the json module package
             Comments look like :
@@ -243,24 +243,23 @@ class Config(dict):
             Much faster than https://github.com/getify/JSON.minify and
             https://gist.github.com/WizKid/1170297
         """
-        with open(filename) as f:
-            content = ''.join(f.readlines())
+        content = ''.join(file.readlines())
 
-            # Regular expression for comment
-            comment_re = re.compile(
-                '(^)?[^\S\n]*/(?:\*(.*?)\*/[^\S\n]*|/[^\n]*)($)?',
-                re.DOTALL | re.MULTILINE
-            )
+        # Regular expression for comment
+        comment_re = re.compile(
+            '(^)?[^\S\n]*/(?:\*(.*?)\*/[^\S\n]*|/[^\n]*)($)?',
+            re.DOTALL | re.MULTILINE
+        )
 
-            ## Looking for comments
+        ## Looking for comments
+        match = comment_re.search(content)
+        while match:
+            # single line comment
+            content = content[:match.start()] + content[match.end():]
             match = comment_re.search(content)
-            while match:
-                # single line comment
-                content = content[:match.start()] + content[match.end():]
-                match = comment_re.search(content)
 
-            # Return json file
-            return json.loads(content)
+        # Return json file
+        return json.loads(content)
 
 
 #: Global Config class instance. Use it to access the CISAppGateway
