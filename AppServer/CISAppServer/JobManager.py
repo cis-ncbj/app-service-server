@@ -409,7 +409,8 @@ class JobManager(object):
 
             try:
                 # Stop if it is running
-                if _job.get_state() == 'running':
+                if _job.get_state() == 'running' or \
+                        _job.get_state() == 'queued':
                     self.schedulers[_job.valid_data['scheduler']].stop(
                         _job, "User request"
                     )
