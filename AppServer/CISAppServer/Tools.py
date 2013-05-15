@@ -50,6 +50,16 @@ class CTemplate(string.Template):
     idpattern = '[_a-z0-9]+'
 
 
+class Service(object):
+    """
+    """
+
+    def __init__(self, data)
+        self.config = data["config"]
+        self.variables = data["variables"]
+        self.sets = data["variables"]
+
+
 class Validator(object):
     """
     Class responsible for validation of job input data.
@@ -77,9 +87,11 @@ class Validator(object):
                 continue
             with open(_file_name) as _f:
                 _data = conf.json_load(_f)
-            self.services[_service] = _data
+            self.services[_service] = Service(_data)
             logger.info("Initialized service: %s" % _service)
-        verbose(json.dumps(self.services))
+        verbose(json.dumps(self.services.config))
+        verbose(json.dumps(self.services.variables))
+        verbose(json.dumps(self.services.sets))
 
     def validate(self, job):
         """
@@ -108,18 +120,43 @@ class Validator(object):
 
         # Load defaults
         _variables = {_k: _v['default']
-                      for _k, _v in self.services[_data['service']].items()}
+                      for _k, _v in self.services[_data['service']].variables.items()}
         _variables.update({_k: _v['default']
-                           for _k, _v in self.services['default'].items()})
+                           for _k, _v in self.services['default'].variables.items()})
 
-        #@TODO Web service should not be allowed to set values for reserved
-        #keys
+        # Load sets
+        for _k, _v in _data.items():
+            if _k in self.services[_data['service']].sets.keys():
+                if _v != 1:
+                    job.die(
+                        "@Validator - Set variables only accept value of 1. "
+                        "(%s: %s)" % (_k, _v),
+                        err=False
+                    )
+                    return False
+                _variables.update(
+                    {_kk: _vv for _kk, _vv in
+                     self.services[
+                         _data['service']
+                     ].sets[_k]['values'].items()}
+                )
+                del _data[_k]
+
+        # Load variables
+        for _k, _v in _data.items():
+            if _k in self.services[_data['service']].variables.keys():
+                _variables[_k] = _v
+            elif _k != 'service':
+                job.die("@Validator - Not supported variable: %s." % _k,
+                        err=False)
+                return False
 
         # Check that all attribute names are defined in service configuration
         # Validate values of the attributes
-        for _k, _v in _data.items():
-            if _k in self.services[_data['service']].keys():
-                if not self.validate_value(_k, _v, _data['service']):
+        for _k, _v in _variables.items():
+            if _k in self.services[_data['service']].variables.keys():
+                if not self.validate_value(_k, _v,
+                        self.services[_data['service']]):
                     job.die(
                         "@Validator - Variable value not allowed: %s - %s." %
                         (_k, _v), err=False
@@ -134,7 +171,7 @@ class Validator(object):
             # Check for possible reserved attribuet names like service, name,
             # date
             elif _k in conf.service_reserved_keys:
-                if not self.validate_value(_k, _v, 'default'):
+                if not self.validate_value(_k, _v, self.services['default']):
                     job.die(
                         "@Validator - Variable value not allowed: %s - %s." %
                         (_k, _v), err=False
@@ -164,17 +201,17 @@ class Validator(object):
 
         :param key: attribute name
         :param value: value to validate
-        :param service: service name for which attribute is defined
+        :param service: service object for which attribute is defined
         :return: True on success False otherwise.
         """
 
-        if self.services[service][key]['type'] == 'string':
+        if service.variables[key]['type'] == 'string':
             # Attribute of type string check the table of allowed values
-            if not value in self.services[service][key]['values']:
+            if not value in service.variables[key]['values']:
                 logger.warning("@Validator - Value not allowed: %s - %s." %
                                (key, value))
                 return False
-        elif self.services[service][key]['type'] == 'int':
+        elif service.variables[key]['type'] == 'int':
             # Attribute of type int - check the format
             try:
                 if isinstance(value, str) or isinstance(value, unicode):
@@ -193,8 +230,8 @@ class Validator(object):
 
             # Check that atrribute value falls in allowed range
             try:
-                if _v < self.services[service][key]['values'][0] or \
-                        _v > self.services[service][key]['values'][1]:
+                if _v < service.variables[key]['values'][0] or \
+                        _v > service.variables[key]['values'][1]:
                     logger.warning(
                         "@Validator - Value not in allowed range: %s - %s" %
                         (key, _v)
@@ -206,7 +243,7 @@ class Validator(object):
                     key
                 )
                 return False
-        elif self.services[service][key]['type'] == 'float':
+        elif service.variables[key]['type'] == 'float':
             # Attribute of type float - check the format
             try:
                 if isinstance(value, str) or isinstance(value, unicode):
@@ -225,8 +262,8 @@ class Validator(object):
 
             # Check that atrribute value falls in allowed range
             try:
-                if _v < self.services[service][key]['values'][0] or \
-                        _v > self.services[service][key]['values'][1]:
+                if _v < service.variables[key]['values'][0] or \
+                        _v > service.variables[key]['values'][1]:
                     logger.warning(
                         "@Validator - Value not in allowed range: %s - %s" %
                         (key, _v)

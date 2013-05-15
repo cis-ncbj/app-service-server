@@ -1,17 +1,21 @@
 {
-    "service" : {
-        "type" : "string",
-        "default" : "",
-        "values" : ["MultiNest", "Test", "EPRCore"]
+    "config" : {},
+    "variables" : {
+        "service" : {
+            "type" : "string",
+            "default" : "",
+            "values" : ["MultiNest", "Test", "EPRCore"]
+        },
+        "scheduler" : {
+            "type" : "string",
+            "default" : "pbs",
+            "values" : ["pbs"]
+        },
+        "queue" : {
+            "type" : "string",
+            "default" : "",
+            "values" : ["", "default"]
+        }
     },
-    "scheduler" : {
-        "type" : "string",
-        "default" : "pbs",
-        "values" : ["pbs"]
-    },
-    "queue" : {
-        "type" : "string",
-        "default" : "",
-        "values" : ["", "default"]
-    }
+    "sets" : {}
 }

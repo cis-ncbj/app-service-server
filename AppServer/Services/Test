@@ -1,22 +1,90 @@
 {
-    "A" : {
-        "type" : "int",
-        "default" : 100,
-        "values" : [0,10000]
+    "config" : {},
+    "variables" : {
+        // Sleep interval
+        "SLEEP" : {
+            "type" : "int",
+            "default" : 3,
+            "values" : [1,30]
+        },
+        // Nominator
+        "1Float" : {
+            "type" : "float",
+            "default" : 1.0,
+            "values" : [-100,100]
+        },
+        // Denominator
+        "2Float" : {
+            "type" : "float",
+            "default" : 20.99,
+            "values" : [-100,100]
+        },
+        // PBS options
+        "PBS_OPTS" : {
+            "type" : "string",
+            "default" : "",
+            "values" : ["", "PBS -l nodes=30"]
+        },
+        // Name of the test
+        "TestName" : {
+            "type" : "string",
+            "default" : "CleanRun",
+            "values" : ["CleanRun","FailRun","LongRun","WaitRun"]
+        },
+        // Command to execute
+        "COMMAND" : {
+            "type" : "string",
+            "default" : "/bin/ls -l",
+            "values" : ["/bin/ls -l", "/bin/ls -l NieIstniejącyPlik"]
+        },
     },
-    "B" : {
-        "type" : "float",
-        "default" : 20.99,
-        "values" : [-100,100]
-    },
-    "C" : {
-        "type" : "string",
-        "default" : "alpha",
-        "values" : ["alpha", "beta", "gamma", "delta"]
-    },
-    "11_11" : {
-        "type" : "int",
-        "default" : 1,
-        "values" : [-10,10]
+    // ****
+    // SETS
+    // ****
+    "sets" : {
+        // Clean execution set
+        "CleanSet" : {
+            "type" : "set",
+            "values" : {
+                "TestName" : "CleanRun",
+                "COMMAND" : "/bin/ls -l",
+                "PBS_OPTS" : "",
+                "SLEEP" : 1
+            }
+        },
+        // Failed execution set
+        "FailSet" : {
+            "type" : "set",
+            "values" : {
+                "TestName" : "FailRun",
+                "COMMAND" : "/bin/ls -l NieIstniejącyPlik",
+                "PBS_OPTS" : "",
+                "SLEEP" : 1
+            }
+        },
+        // Long execution set
+        "LongSet" : {
+            "type" : "set",
+            "values" : {
+                "TestName" : "LongRun",
+                "COMMAND" : "/bin/ls -l",
+                "PBS_OPTS" : "",
+                "SLEEP" : 5,
+                "1Float" : 22.5,
+                "2Float" : 39.67
+            }
+        },
+        // Stuck in queue set
+        "WaitSet" : {
+            "type" : "set",
+            "values" : {
+                "TestName" : "WaitRun",
+                "COMMAND" : "/bin/ls -l",
+                "PBS_OPTS" : "PBS -l nodes=30",
+                "SLEEP" : 1,
+                "1Float" : -12.5,
+                "2Float" : 9.66
+            }
+        }
     }
 }

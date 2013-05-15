@@ -200,7 +200,7 @@ class Job(object):
                 os.path.join(conf.gate_path_delete, self.id)
             )
         except:
-            logger.error("@Job - Cannot mark job %s for removal." % _name,
+            logger.error("@Job - Cannot mark job %s for removal." % self.id,
                          exc_info=True)
 
     def __check_state(self):

@@ -1,52 +1,56 @@
 {
-    "nodes_min" : {
-        "type" : "int",
-        "default" : 10,
-        "values" : [0,1000]
+    "config" : {},
+    "variables" : {
+        "nodes_min" : {
+            "type" : "int",
+            "default" : 10,
+            "values" : [0,1000]
+        },
+        "nodes_max" : {
+            "type" : "int",
+            "default" : 10,
+            "values" : [0,1000]
+        },
+        "xsize" : {
+            "type" : "int",
+            "default" : 100,
+            "values" : [0,10000]
+        },
+        "ysize" : {
+            "type" : "int",
+            "default" : 100,
+            "values" : [0,10000]
+        },
+        "sigma_min" : {
+            "type" : "float",
+            "default" : 1,
+            "values" : [1,100]
+        },
+        "sigma_max" : {
+            "type" : "float",
+            "default" : 6,
+            "values" : [1,100]
+        },
+        "n_live_points" : {
+            "type" : "int",
+            "default" : 1000,
+            "values" : [0,100000]
+        },
+        "sampling_efficiency" : {
+            "type" : "float",
+            "default" : 0.8,
+            "values" : [0,1]
+        },
+        "evidence_tolerance" : {
+            "type" : "float",
+            "default" : 0.5,
+            "values" : [0,1]
+        },
+        "max_modes" : {
+            "type" : "int",
+            "default" : 100,
+            "values" : [1,1000]
+        }
     },
-    "nodes_max" : {
-        "type" : "int",
-        "default" : 10,
-        "values" : [0,1000]
-    },
-    "xsize" : {
-        "type" : "int",
-        "default" : 100,
-        "values" : [0,10000]
-    },
-    "ysize" : {
-        "type" : "int",
-        "default" : 100,
-        "values" : [0,10000]
-    },
-    "sigma_min" : {
-        "type" : "float",
-        "default" : 1,
-        "values" : [1,100]
-    },
-    "sigma_max" : {
-        "type" : "float",
-        "default" : 6,
-        "values" : [1,100]
-    },
-    "n_live_points" : {
-        "type" : "int",
-        "default" : 1000,
-        "values" : [0,100000]
-    },
-    "sampling_efficiency" : {
-        "type" : "float",
-        "default" : 0.8,
-        "values" : [0,1]
-    },
-    "evidence_tolerance" : {
-        "type" : "float",
-        "default" : 0.5,
-        "values" : [0,1]
-    },
-    "max_modes" : {
-        "type" : "int",
-        "default" : 100,
-        "values" : [1,1000]
-    }
+    "sets" : {}
 }
