@@ -50,15 +50,18 @@ class CTemplate(string.Template):
     idpattern = '[_a-z0-9]+'
 
 
-class Service(object):
+class Service(dict):
     """
     """
+    def __init__(self, data, *args, **kwargs):
+        # Service is a dict. Make all the keys accessible as attributes while
+        # retaining the dict API
+        super(Service, self).__init__(*args, **kwargs)
+        self.__dict__ = self
 
-    def __init__(self, data)
         self.config = data["config"]
         self.variables = data["variables"]
-        self.sets = data["variables"]
-
+        self.sets = data["sets"]
 
 class Validator(object):
     """
@@ -89,9 +92,7 @@ class Validator(object):
                 _data = conf.json_load(_f)
             self.services[_service] = Service(_data)
             logger.info("Initialized service: %s" % _service)
-        verbose(json.dumps(self.services.config))
-        verbose(json.dumps(self.services.variables))
-        verbose(json.dumps(self.services.sets))
+        verbose(json.dumps(self.services))
 
     def validate(self, job):
         """
@@ -144,9 +145,14 @@ class Validator(object):
 
         # Load variables
         for _k, _v in _data.items():
-            if _k in self.services[_data['service']].variables.keys():
+            if _k in conf.service_reserved_keys and _k != 'service':
+                job.die("@Validator - '%s' variable name is restricted." % _k,
+                        err=False)
+                return False
+            elif _k in self.services[_data['service']].variables.keys() or \
+               _k == 'service':
                 _variables[_k] = _v
-            elif _k != 'service':
+            else:
                 job.die("@Validator - Not supported variable: %s." % _k,
                         err=False)
                 return False
@@ -465,6 +471,21 @@ class Scheduler(object):
         except:
             job.die(
                 "@Scheduler - Unable to change permissions for pbs.sh: %s." %
+                job.id, exc_info=True
+            )
+            return False
+
+        # Make sure that "epilogue.sh" is executable
+        # Make sure it is not writable by group and others - torque will
+        # silently ignore it otherwise
+        try:
+            _st = os.stat(os.path.join(_script_dir, 'epilogue.sh'))
+            os.chmod(os.path.join(_work_dir, 'epilogue.sh'),
+                     (_st.st_mode | stat.S_IXUSR) &
+                     ( ~stat.S_IWGRP & ~stat.S_IWOTH))
+        except:
+            job.die(
+                "@Scheduler - Unable to change permissions for epilogue.sh: %s." %
                 job.id, exc_info=True
             )
             return False

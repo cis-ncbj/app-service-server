@@ -280,6 +280,8 @@ class Config(dict):
             content = content[:match.start()] + content[match.end():]
             match = comment_re.search(content)
 
+        logger.log(VERBOSE, content)
+
         # Return json file
         return json.loads(content)
 
