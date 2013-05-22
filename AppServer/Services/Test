@@ -34,9 +34,9 @@
         // Command to execute
         "COMMAND" : {
             "type" : "string",
-            "default" : "/bin/ls -l",
-            "values" : ["/bin/ls -l", "/bin/ls -l NieIstniejącyPlik"]
-        },
+            "default" : "/bin/ls",
+            "values" : ["/bin/ls", "/bin/ls NieIstniejącyPlik"]
+        }
     },
     // ****
     // SETS
@@ -47,7 +47,8 @@
             "type" : "set",
             "values" : {
                 "TestName" : "CleanRun",
-                "COMMAND" : "/bin/ls -l",
+                "queue" : "short",
+                "COMMAND" : "/bin/ls",
                 "PBS_OPTS" : "",
                 "SLEEP" : 1
             }
@@ -57,7 +58,8 @@
             "type" : "set",
             "values" : {
                 "TestName" : "FailRun",
-                "COMMAND" : "/bin/ls -l NieIstniejącyPlik",
+                "queue" : "short",
+                "COMMAND" : "/bin/ls NieIstniejącyPlik",
                 "PBS_OPTS" : "",
                 "SLEEP" : 1
             }
@@ -67,7 +69,8 @@
             "type" : "set",
             "values" : {
                 "TestName" : "LongRun",
-                "COMMAND" : "/bin/ls -l",
+                "queue" : "long",
+                "COMMAND" : "/bin/ls",
                 "PBS_OPTS" : "",
                 "SLEEP" : 5,
                 "1Float" : 22.5,
@@ -79,7 +82,8 @@
             "type" : "set",
             "values" : {
                 "TestName" : "WaitRun",
-                "COMMAND" : "/bin/ls -l",
+                "queue" : "short",
+                "COMMAND" : "/bin/ls",
                 "PBS_OPTS" : "PBS -l nodes=30",
                 "SLEEP" : 1,
                 "1Float" : -12.5,

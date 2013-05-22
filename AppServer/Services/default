@@ -13,8 +13,8 @@
         },
         "queue" : {
             "type" : "string",
-            "default" : "",
-            "values" : ["", "default"]
+            "default" : "short",
+            "values" : ["short", "long"]
         }
     },
     "sets" : {}
