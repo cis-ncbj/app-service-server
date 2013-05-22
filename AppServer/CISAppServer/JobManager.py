@@ -287,13 +287,13 @@ class JobManager(object):
 
         # Handle zombies
         if job_id not in self.__jobs.keys():
-            logger.error('@JManager - Job %s is missing from '
-                         'overall job list.' % job_id)
             if create:
                 _job = Job(job_id)
                 self.__jobs[job_id] = _job
                 return _job
             else:
+                logger.error('@JManager - Job %s is missing from '
+                             'overall job list.' % job_id)
                 return None
 
         return self.__jobs[job_id]
@@ -316,17 +316,14 @@ class JobManager(object):
         for _jid in _queue:
             logger.debug('@JManager - Detected new job %s.' % _jid)
 
-            # Create ne job instance
-            _job = Job(_jid)
+            # Create new job instance. It is possible that it is already
+            # created during initialization or while checking for old jobs to
+            # remove, therefore use self.get_job.
+            _job = self.get_job(_jid, create=True)
             if _job is None:
                 continue
 
-            if _jid in self.__jobs.keys():
-                _job.die("@JManager - Job ID already used: %s" % _jid)
-                continue
-
             try:
-                self.__jobs[_jid] = _job
                 if self.submit(_job):
                     _job.set_state('queued')
                 # Submit can return False when queue is full. Do not terminate
