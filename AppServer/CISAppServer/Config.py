@@ -182,15 +182,22 @@ class Config(dict):
             self.update(_conf)
 
         logger.debug('@Config - Finalise configuration initialisation')
-        # Override log levels
-        for _key in self.log_config['handlers'].keys():
-            if self.log_level_cli is not None and _key != 'mail':
-                self.log_config['handlers'][_key]['level'] = self.log_level_cli
-        self.log_config['root']['level'] = self.log_level_cli
-        if self.log_output_cli is not None and \
+        # Override config values by command line
+        if self.log_level_cli is not None:
+            self.log_level = self.log_level_cli
+        if self.log_output_cli is not None:
+            self.log_output = self.log_output_cli
+
+        # Override logger settings
+        if self.log_level is not None:
+            for _key in self.log_config['handlers'].keys():
+                if _key != 'mail':
+                    self.log_config['handlers'][_key]['level'] = self.log_level
+            self.log_config['root']['level'] = self.log_level
+        if self.log_output is not None and \
            'file' in self.log_config['handlers'].keys():
             self.log_config['handlers']['file']['filename'] = \
-                self.log_output_cli
+                self.log_output
 
         # Normalize paths to full versions
         for _key, _value in self.items():

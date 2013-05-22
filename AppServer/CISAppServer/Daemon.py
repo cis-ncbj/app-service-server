@@ -131,7 +131,7 @@ class DaemonRunner(object):
             '-c', '--config', dest='config', action='store',
             default='CISAppServer.json', help='Configuration file.')
         _parser.add_argument(
-            '--log', dest='log', action='store', default='DEBUG',
+            '--log', dest='log', action='store',
             choices=['VERBOSE', 'DEBUG', 'INFO', 'WARNING', 'ERROR'],
             help='Logging level.')
         _parser.add_argument(
@@ -155,23 +155,30 @@ class DaemonRunner(object):
         _args = _parser.parse_args()
 
         # Setup logging interface
-        conf.log_level_cli = _args.log.upper()  #: Logging level to use
+        conf.log_level_cli = _args.log  #: Logging level to use
+        if conf.log_level_cli is not None:
+            conf.log_level_cli = conf.log_level_cli.upper()
+            _log_level_name = conf.log_level_cli
+        else:
+            _log_level_name = 'INFO'
         conf.log_output_cli = _args.log_output  #: Log output file name
+
         logging.VERBOSE = T.VERBOSE
         logging.addLevelName(T.VERBOSE, 'VERBOSE')
-        _log_level = getattr(logging, conf.log_level_cli)
+        _log_level = getattr(logging, _log_level_name)
         logging.basicConfig(
             level=_log_level,
             format='%(levelname)-8s %(message)s',
         )
 
         info("CISAppS %s" % version)
-        info("Logging level: %s" % conf.log_level)
+        info("CLI Logging level: %s" % _log_level_name)
         info("Configuration file: %s" % _args.config)
 
         # Load configuration from option file
         debug('@Daemon - Loading global configuration ...')
         conf.load(_args.config)
+        info("Logging level: %s" % conf.log_level)
 
         self.action = unicode(_args.action)
         if self.action not in self.action_funcs:
