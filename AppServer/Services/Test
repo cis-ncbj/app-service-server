@@ -61,7 +61,7 @@
         // Long execution set
         "LongSet" : {
             "TestName" : "LongRun",
-            "queue" : "long",
+            "queue" : "short",
             "COMMAND" : "/bin/ls",
             "PBS_OPTS" : "",
             "SLEEP" : 5,
