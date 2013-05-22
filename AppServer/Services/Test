@@ -44,51 +44,39 @@
     "sets" : {
         // Clean execution set
         "CleanSet" : {
-            "type" : "set",
-            "values" : {
-                "TestName" : "CleanRun",
-                "queue" : "short",
-                "COMMAND" : "/bin/ls",
-                "PBS_OPTS" : "",
-                "SLEEP" : 1
-            }
+            "TestName" : "CleanRun",
+            "queue" : "short",
+            "COMMAND" : "/bin/ls",
+            "PBS_OPTS" : "",
+            "SLEEP" : 1
         },
         // Failed execution set
         "FailSet" : {
-            "type" : "set",
-            "values" : {
-                "TestName" : "FailRun",
-                "queue" : "short",
-                "COMMAND" : "/bin/ls NieIstniejącyPlik",
-                "PBS_OPTS" : "",
-                "SLEEP" : 1
-            }
+            "TestName" : "FailRun",
+            "queue" : "short",
+            "COMMAND" : "/bin/ls NieIstniejącyPlik",
+            "PBS_OPTS" : "",
+            "SLEEP" : 1
         },
         // Long execution set
         "LongSet" : {
-            "type" : "set",
-            "values" : {
-                "TestName" : "LongRun",
-                "queue" : "long",
-                "COMMAND" : "/bin/ls",
-                "PBS_OPTS" : "",
-                "SLEEP" : 5,
-                "1Float" : 22.5,
-                "2Float" : 39.67
-            }
+            "TestName" : "LongRun",
+            "queue" : "long",
+            "COMMAND" : "/bin/ls",
+            "PBS_OPTS" : "",
+            "SLEEP" : 5,
+            "1Float" : 22.5,
+            "2Float" : 39.67
         },
         // Stuck in queue set
         "WaitSet" : {
-            "type" : "set",
-            "values" : {
-                "TestName" : "WaitRun",
-                "queue" : "short",
-                "COMMAND" : "/bin/ls",
-                "PBS_OPTS" : "PBS -l nodes=30",
-                "SLEEP" : 1,
-                "1Float" : -12.5,
-                "2Float" : 9.66
-            }
+            "TestName" : "WaitRun",
+            "queue" : "short",
+            "COMMAND" : "/bin/ls",
+            "PBS_OPTS" : "PBS -l nodes=30",
+            "SLEEP" : 1,
+            "1Float" : -12.5,
+            "2Float" : 9.66
         }
     }
 }

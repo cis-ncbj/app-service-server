@@ -63,6 +63,7 @@ class Service(dict):
         self.variables = data["variables"]
         self.sets = data["sets"]
 
+
 class Validator(object):
     """
     Class responsible for validation of job input data.
@@ -120,10 +121,14 @@ class Validator(object):
             return False
 
         # Load defaults
-        _variables = {_k: _v['default']
-                      for _k, _v in self.services[_data['service']].variables.items()}
-        _variables.update({_k: _v['default']
-                           for _k, _v in self.services['default'].variables.items()})
+        _variables = {
+            _k: _v['default'] for _k, _v in
+            self.services[_data['service']].variables.items()
+        }
+        _variables.update({
+            _k: _v['default'] for _k, _v in
+            self.services['default'].variables.items()
+        })
 
         # Load sets
         for _k, _v in _data.items():
@@ -132,7 +137,7 @@ class Validator(object):
                     # Value specified as string - check the format using python
                     # builtin conversion
                     _v = int(_v)
-                elif not isinstance(value, int):
+                elif not isinstance(_v, int):
                     # Value specified neither as int nor string - raise error
                     job.die(
                         "@Validator - Set variables have to be of type int or "
@@ -150,7 +155,7 @@ class Validator(object):
                     {_kk: _vv for _kk, _vv in
                      self.services[
                          _data['service']
-                     ].sets[_k]['values'].items()}
+                     ].sets[_k].items()}
                 )
                 del _data[_k]
 
@@ -161,7 +166,7 @@ class Validator(object):
                         err=False)
                 return False
             elif _k in self.services[_data['service']].variables.keys() or \
-               _k == 'service':
+                    _k == 'service':
                 _variables[_k] = _v
             else:
                 job.die("@Validator - Not supported variable: %s." % _k,
@@ -173,7 +178,7 @@ class Validator(object):
         for _k, _v in _variables.items():
             if _k in self.services[_data['service']].variables.keys():
                 if not self.validate_value(_k, _v,
-                        self.services[_data['service']]):
+                                           self.services[_data['service']]):
                     job.die(
                         "@Validator - Variable value not allowed: %s - %s." %
                         (_k, _v), err=False
@@ -493,11 +498,11 @@ class Scheduler(object):
             _st = os.stat(os.path.join(_script_dir, 'epilogue.sh'))
             os.chmod(os.path.join(_work_dir, 'epilogue.sh'),
                      (_st.st_mode | stat.S_IXUSR) &
-                     ( ~stat.S_IWGRP & ~stat.S_IWOTH))
+                     (~stat.S_IWGRP & ~stat.S_IWOTH))
         except:
             job.die(
-                "@Scheduler - Unable to change permissions for epilogue.sh: %s." %
-                job.id, exc_info=True
+                "@Scheduler - Unable to change permissions for epilogue.sh: "
+                "%s." % job.id, exc_info=True
             )
             return False
 
@@ -725,8 +730,8 @@ class PbsScheduler(Scheduler):
 
         logger.debug("@PBS - Retrive job output: %s" % job.id)
         _work_dir = os.path.join(self.work_path, job.id)
-        _job_state = 'abort' # Job state
-        _status = 0 # Job exit status
+        _job_state = 'abort'  # Job state
+        _status = 0  # Job exit status
 
         # Get job output code
         try:
@@ -751,7 +756,7 @@ class PbsScheduler(Scheduler):
                 # out and dump should be on the same partition so that rename
                 # is used. This will make sure that processes reading from out
                 # will not cause rmtree to throw exceptions
-                shutil.move(_out_dir, _dump_dir) 
+                shutil.move(_out_dir, _dump_dir)
                 shutil.rmtree(_dump_dir, ignore_errors=True)
             shutil.move(_work_dir, conf.gate_path_output)
             logger.info("Job %s output retrived." % job.id)
