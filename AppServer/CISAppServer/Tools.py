@@ -128,6 +128,17 @@ class Validator(object):
         # Load sets
         for _k, _v in _data.items():
             if _k in self.services[_data['service']].sets.keys():
+                if isinstance(_v, str) or isinstance(_v, unicode):
+                    # Value specified as string - check the format using python
+                    # builtin conversion
+                    _v = int(_v)
+                elif not isinstance(value, int):
+                    # Value specified neither as int nor string - raise error
+                    job.die(
+                        "@Validator - Set variables have to be of type int or "
+                        "string. (%s: %s)" % (_k, _v),
+                        err=False
+                    )
                 if _v != 1:
                     job.die(
                         "@Validator - Set variables only accept value of 1. "
