@@ -258,19 +258,24 @@ class Config(dict):
         logger.log(VERBOSE, self)
 
     def json_load(self, file):
-        """ Parse a JSON file
-            First remove comments and then use the json module package
-            Comments look like :
+        """
+        Parse a JSON file
+
+        First remove comments and then use the json module package
+        Comments look like ::
+
                 // ...
             or
                 /*
                 ...
                 */
 
-            Based on:
-            http://www.lifl.fr/~riquetd/parse-a-json-file-with-comments.html
-            Much faster than https://github.com/getify/JSON.minify and
-            https://gist.github.com/WizKid/1170297
+        Based on:
+        http://www.lifl.fr/~riquetd/parse-a-json-file-with-comments.html.
+        Much faster than https://github.com/getify/JSON.minify and
+        https://gist.github.com/WizKid/1170297
+
+        :param file: name of the file to parse.
         """
         content = ''.join(file.readlines())
 
