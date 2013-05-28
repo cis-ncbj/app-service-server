@@ -48,9 +48,11 @@ class Config(dict):
         self.config_sleep_time = 3
         #: Every n-th status query dump the progress logs
         self.config_progress_step = 2
-        #: Interval in hours after which job is automatically removed with all data
+        #: Interval in hours after which job is automatically removed with all
+        #: data
         self.config_delete_interval = 48
-        #: Interval in hours after which job is automatically killed if in running state
+        #: Interval in hours after which job is automatically killed if in
+        #: running state
         self.config_kill_interval = 24
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
@@ -123,13 +125,28 @@ class Config(dict):
         )
         #: Reserved key names for job parameters
         self.service_reserved_keys = ('service', 'name', 'scheduler', 'queue')
+        #: Default job minimum lifetime in minutes. Jobs that are younger then
+        #: this cannot be removed by garbage collector
+        self.service_min_lifetime = 120
+        #: Default job maximum lifetime in minutes. Jobs that are older then
+        #: this will be removed by garbage collector. Setting this to zero
+        #: means jobs can be immortal (at least until service quota is
+        #: exceeded)
+        self.service_max_lifetime = 2880
+        #: Default maximum number of concurrent jobs allowed per dervice
+        self.service_max_jobs = 80
+        #: Defaul maximum disk size used by service output files in MB
+        self.service_quota = 10000
+        #: Default expected output size of a job in MB. It is used to estimate
+        #: space requirements for jobs that are to be scheduled.
+        self.service_job_size = 50
         #: Path to the shared storage used as communication medium with
         #: AppGateway
         self.gate_path_shared = 'Shared'
         #: Path where jobs output will be stored
         self.gate_path_output = 'Output'
         #: Path where jobs output is moved before removal (aleviates problems
-        #  with files that are still in use)
+        #: with files that are still in use)
         self.gate_path_dump = 'Dump'
         #: Path were jobs description is stored
         self.gate_path_jobs = None

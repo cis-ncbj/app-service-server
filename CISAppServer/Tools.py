@@ -52,6 +52,9 @@ class CTemplate(string.Template):
 
 class Service(dict):
     """
+    Class implementing a Service.
+
+    Stores Service configuration and monitors its state.
     """
     def __init__(self, data, *args, **kwargs):
         # Service is a dict. Make all the keys accessible as attributes while
@@ -59,9 +62,32 @@ class Service(dict):
         super(Service, self).__init__(*args, **kwargs)
         self.__dict__ = self
 
-        self.config = data["config"]
-        self.variables = data["variables"]
-        self.sets = data["sets"]
+        #: Configuration options affecting service handling - like allowed
+        #: diskspace and garbage collection
+        self.config = {
+            'min_lifetime': conf.service_min_lifetime,
+            'max_lifetime': conf.service_max_lifetime,
+            'max_jobs': conf.service_max_jobs,
+            'quota': conf.service_quota,
+            'job_size': conf.service_job_size
+        }
+        # Load settings from config file
+        self.config.update(data['config'])
+        #: Definitions of allowed variables
+        self.variables = data['variables']
+        #: Definitions of allowed variable sets
+        self.sets = data['sets']
+
+    def add_job(self):
+        self.current_size += self.config['job_size']
+
+    def update_job(self, job):
+        job.calculate_size()
+        self.current_size -= self.config['job_size']
+        self.current_size += job.get_size()
+
+    def remove_job(self, job):
+        self.current_size -= job.get_size()
 
 
 class Validator(object):

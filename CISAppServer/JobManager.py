@@ -13,6 +13,7 @@ import shutil
 import time
 import logging
 from datetime import datetime, timedelta
+from subprocess import Popen, PIPE, STDOUT
 
 import Tools as T
 from Config import conf
@@ -49,24 +50,37 @@ class Job(object):
         #: Job parameters after validation
         self.valid_data = {}
         self.__state = None
+        self.__size = 0
 
         # Load job file from jobs directory
         try:
             _name = os.path.join(conf.gate_path_jobs, self.id)
             with open(_name) as _f:
                 self.data = json.load(_f)
-            logger.debug('@Job - Loaded data file %s.' % self.id)
+            logger.debug(u'@Job - Loaded data file %s.' % self.id)
             logger.debug(self.data)
         except:
-            self.die("@Job - Cannot load data file %s." % _name, exc_info=True)
+            self.die(u"@Job - Cannot load data file %s." % _name,
+                     exc_info=True)
             return None
 
         try:
             self.__check_state()
         except:
-            self.die("@Job - Unable to check state (%s)." % self.id,
+            self.die(u"@Job - Unable to check state (%s)." % self.id,
                      exc_info=True)
             return None
+
+        self.calculate_size()
+
+    def get_size(self):
+        """
+        Get the size of job output directory.
+        Requires that calculate_size was called first.
+
+        :return: Size of output directory in bytes.
+        """
+        return self.__size
 
     def get_state(self):
         """
@@ -203,6 +217,45 @@ class Job(object):
             logger.error("@Job - Cannot mark job %s for removal." % self.id,
                          exc_info=True)
 
+    def calculate_size(self):
+        """
+        Calculate size of output directory of the job if it exists.
+        """
+        self.__size = 0
+
+        # Only consider job states that could have an output dir
+        if self.__state not in ('done', 'failed', 'killed'):
+            return
+
+        try:
+            # Check taht output dir exists
+            _name = os.path.join(conf.gate_path_jobs, self.id)
+            if not os.path.exists(_name):
+                return
+
+            # Use /usr/bin/du as os.walk is very slow
+            _proc = Popen(u'/usr/bin/du -sb ' + _name,
+                          stdout=PIPE, stderr=STDOUT)
+            _output = _proc.communicate()
+            # Hopefully du returned meaningful result
+            _size = "\s".split(_output[0])[0]
+            # Check return code. If du was not killed by signal Popen will
+            # not rise an exception
+            if _proc.returncode != 0:
+                raise OSError((
+                    _proc.returncode,
+                    "/usr/bin/du returned non zero exit code.\n%s" %
+                    str(_output)
+                ))
+        except:
+            logger.error(
+                "@Job - Unable to calculate job output size %s." % self.id,
+                exc_info=True
+            )
+            return
+
+        self.__size = _size
+
     def __check_state(self):
         """
         Query the shared storage to identify current job state.
@@ -326,6 +379,8 @@ class JobManager(object):
             try:
                 if self.submit(_job):
                     _job.set_state('queued')
+                    self.validator.services[
+                        _job.data['service']].add_job()
                 # Submit can return False when queue is full. Do not terminate
                 # job here so it can be resubmitted next time. If submission
                 # failed scheduler should have set job state to Aborted anyway.
@@ -380,6 +435,8 @@ class JobManager(object):
                     logger.debug('@JManager - Detected finished job: %s.' %
                                  _jid)
                     _scheduler.finalise(_job)
+                    self.validator.services[
+                        _job.data['service']].update_job(_job)
                 elif _status == 'unknown':
                     logger.warning(
                         "@JManager - Scheduler returned 'unknown' status "
@@ -438,7 +495,7 @@ class JobManager(object):
             _dump = os.path.join(conf.gate_path_dump, _jid)
             try:
                 if os.path.isdir(_output):
-                    shutil.move(_output, _dump) 
+                    shutil.move(_output, _dump)
                     shutil.rmtree(_dump, onerror=T.rmtree_error)
             except:
                 logger.error("Cannot remove job output %s." % _jid,
@@ -447,39 +504,43 @@ class JobManager(object):
             # Remove job from the list
             del self.__jobs[_jid]
             logger.info('@JManager - Job %s removed with all data.' %
-                         _jid)
+                        _jid)
 
     def check_old_jobs(self):
         """Check for jobs that exceed their life time.
 
-        If found mark them for removal. [Not Implemented]"""
+        If found mark them for removal."""
 
         try:
             _queue = os.listdir(conf.gate_path_jobs)
         except:
-            logger.error("@JManager - Unable to read job queue: %s." %
+            logger.error(u"@JManager - Unable to read job queue: %s." %
                          conf.gate_path_jobs, exc_info=True)
             return
 
         for _jid in _queue:
             _job = self.get_job(_jid, create=True)
-            if _job is None:
+            if _job is None or not _job.valid_data:
                 continue
 
+            _delete_dt = self.validator.services[
+                _job.valid_data['service']].max_lifetime
+            if _delete_dt == 0:
+                continue
             _state = _job.get_state()
             _now = datetime.now()
-            _dt = timedelta(hours=conf.config_delete_interval)
+            _dt = timedelta(hours=_delete_dt)
             _path = None
             try:
-                if _state in ['aborted', 'killed']:
+                if _state in ['aborted']:
                     _path = os.path.join(conf.gate_path_jobs, _jid)
-                elif _state in ['done', 'failed']:
+                elif _state in ['done', 'failed', 'killed']:
                     _path = os.path.join(conf.gate_path_output, _jid)
                 elif _state == 'running':
                     _path = os.path.join(conf.gate_path_running, _jid)
                     _dt = timedelta(hours=conf.config_kill_interval)
                 else:
-                    return
+                    continue
 
                 _path_time = datetime.fromtimestamp(os.path.getctime(_path))
                 _path_time += _dt
@@ -487,12 +548,72 @@ class JobManager(object):
                 logger.error(
                     "@JManager - Unable to extract job change time: %s." %
                     _jid, exc_info=True)
-                return
+                continue
 
             if _path_time < _now:
                 logger.info("@JManager - Job reached storage time limit. "
                             "Sheduling for removal.")
                 _job.delete()
+
+    def collect_garbage(self, service, delta=0, full=False):
+        """
+        """
+        # Get Service instance
+        _service = self.validator.services[service]
+
+        # Check quota - size is stored in bytes while quota and delta in MBs
+        if _service.current_size < _service.qouta*1000000 + delta*1000000:
+            return True
+
+        _job_table = []  # List of tuples (lifetime, job)
+        for _jid, _job in self.__jobs.items():
+            # Get protection interval
+            _protect_dt = self.validator.services[
+                _job.valid_data['service']].min_lifetime
+            _dt = timedelta(hours=_protect_dt)
+            _state = _job.get_state()
+            _now = datetime.now()
+            _path = None
+            try:
+                # We consider only jobs that could have produced output
+                if _state in ['done', 'failed', 'killed']:
+                    _path = os.path.join(conf.gate_path_output, _jid)
+                else:
+                    continue
+
+                # Jobs that are too young and are still in protection interval
+                # are skipped
+                _path_time = datetime.fromtimestamp(os.path.getctime(_path))
+                if _path_time + _dt < _now:
+                    continue
+
+                # Calculate lifetime
+                _lifetime = _now - _path_time
+            except:
+                logger.error(
+                    "@JManager - Unable to extract job change time: %s." %
+                    _jid, exc_info=True)
+                continue
+
+            # Append to the job table
+            _job_table.append((_lifetime, _job))
+
+        # Revers sort the table - oldest first
+        _job_table = sorted(_job_table, reverse=True)
+        # We are aiming at 80% quota utilisation
+        _water_mark = _service.quota * 0.8 * 1000000
+        # Remove oldest jobs first until water mark is reached
+        for _item in _job_table:
+            _job = _item[1]
+            _service.remove_job(_job)
+            _job.delete()
+            if _service.current_size < _water_mark:
+                break
+
+        if _service.current_size + delta*1000000 < _service.quota*1000000:
+            return True
+        else:
+            return False
 
     def submit(self, job):
         """
