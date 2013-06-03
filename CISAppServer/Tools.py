@@ -77,17 +77,47 @@ class Service(dict):
         self.variables = data['variables']
         #: Definitions of allowed variable sets
         self.sets = data['sets']
+        #: Real space usage by service output files
+        self.real_size = 0
+        #: Projection of space usage by service output files
+        self.current_size = 0
+        self.__job_proxies = []
+        self.__jobs = []
 
-    def add_job(self):
+    def add_job_proxy(self, job):
+        if job.id in self.__job_proxies.keys():
+            logger.error("@Service - Job proxy already exists: %s" % job.id)
+            return
+
         self.current_size += self.config['job_size']
+        self.__job_proxies.append(job.id)
+
+    def remove_job_proxy(self, job):
+        if job.id in self.__job_proxies.keys():
+            self.__job_proxies.remove(job.id)
+            self.current_size -= job.get_size()
 
     def update_job(self, job):
+        if job.id in self.__jobs.keys():
+            logger.error("@Service - Job already exists: %s" % job.id)
+            return
         job.calculate_size()
-        self.current_size -= self.config['job_size']
+        if job.id in self.__job_proxies.keys():
+            self.current_size -= self.config['job_size']
+        else:
+            self.__job_proxies.append(job.id)
         self.current_size += job.get_size()
+        self.real_size += job.get_size()
 
     def remove_job(self, job):
-        self.current_size -= job.get_size()
+        if job.id not in self.__jobs.keys():
+            logger.error("@Service - Job does not exist: %s" % job.id)
+            return
+        if job.id in self.__job_proxies.keys():
+            self.__job_proxies.remove(job.id)
+            self.current_size -= job.get_size()
+        self.__jobs.remove(job.id)
+        self.real_size -= job.get_size()
 
 
 class Validator(object):

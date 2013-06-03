@@ -20,8 +20,8 @@ from Config import conf
 
 version = "0.2"
 
-
 logger = logging.getLogger(__name__)
+g_1M = 1000000
 
 
 class Job(object):
@@ -304,11 +304,14 @@ class JobManager(object):
         self.schedulers = {  #: Scheduler interface instances
             'pbs': T.PbsScheduler()
         }
+        self.services = self.validator.services
 
         # Job list
         self.__jobs = {}
         # State of the job queue
         self.__queue_running = True
+        # Warning counter
+        self.__warning_counter = 0
 
         # Load existing jobs
         _list = os.listdir(conf.gate_path_jobs)
@@ -326,6 +329,9 @@ class JobManager(object):
             self.__jobs[_jid] = _job
             # Make sure Job.valid_data is present
             self.validator.validate(_job)
+            # Update service quota
+            if _job.get_state in ['done', 'failed', 'killed']:
+                self.services[_job.valid_data['service']].update_job(_job)
 
     def get_job(self, job_id, create=False):
         """
@@ -376,11 +382,30 @@ class JobManager(object):
             if _job is None:
                 continue
 
+            if not self.validator.validate(_job):  # Validate input
+                continue
+
+            _service = self.services[_job.valid_data['service']]
+            if not self.collect_garbage(_service, _service.config['job_size']):
+                if self.__warning_counter < 100:
+                    logger.warning(
+                        "@JManager - Cannot collect garbage for service: %s" %
+                        _job.valid_data['service']
+                    )
+                    self.__warning_counter += 1
+                else:
+                    logger.error(
+                        "@JManager - Cannot collect garbage for service: %s. "
+                        "Message repeated 100 times." %
+                        _job.valid_data['service']
+                    )
+                    self.__warning_counter = 0
+                continue
+
             try:
                 if self.submit(_job):
                     _job.set_state('queued')
-                    self.validator.services[
-                        _job.data['service']].add_job()
+                    _service.add_job_proxy(_job)
                 # Submit can return False when queue is full. Do not terminate
                 # job here so it can be resubmitted next time. If submission
                 # failed scheduler should have set job state to Aborted anyway.
@@ -435,8 +460,7 @@ class JobManager(object):
                     logger.debug('@JManager - Detected finished job: %s.' %
                                  _jid)
                     _scheduler.finalise(_job)
-                    self.validator.services[
-                        _job.data['service']].update_job(_job)
+                    self.services[_job.valid_data['service']].update_job(_job)
                 elif _status == 'unknown':
                     logger.warning(
                         "@JManager - Scheduler returned 'unknown' status "
@@ -497,6 +521,8 @@ class JobManager(object):
                 if os.path.isdir(_output):
                     shutil.move(_output, _dump)
                     shutil.rmtree(_dump, onerror=T.rmtree_error)
+                # Update service quota status
+                self.services[_job.valid_data['service']].remove_job(_job)
             except:
                 logger.error("Cannot remove job output %s." % _jid,
                              exc_info=True)
@@ -523,8 +549,7 @@ class JobManager(object):
             if _job is None or not _job.valid_data:
                 continue
 
-            _delete_dt = self.validator.services[
-                _job.valid_data['service']].max_lifetime
+            _delete_dt = self.services[_job.valid_data['service']].max_lifetime
             if _delete_dt == 0:
                 continue
             _state = _job.get_state()
@@ -557,19 +582,33 @@ class JobManager(object):
 
     def collect_garbage(self, service, delta=0, full=False):
         """
+        Check if service quota is not exceeded. If yes remove oldest finished
+        jobs.
+
+        @param service - Service object for which garbage collection should be
+                         performed.
+        @param delta - Perform the quota check as if current disk usage was
+                       increased by delta MBs.
+        @param full - If True force garbage collection even if disk usage is
+                      not above alloted quota. In addition removes all jobs
+                      older than min job life time.
+        @return True if quota is not reached or garbage collection succeeded.
         """
         # Get Service instance
-        _service = self.validator.services[service]
+        _service = self.services[service]
 
         # Check quota - size is stored in bytes while quota and delta in MBs
-        if _service.current_size < _service.qouta*1000000 + delta*1000000:
+        if _service.current_size + delta * g_1M < _service.qouta * g_1M and \
+           _service.real_size < _service.qouta * g_1M * 1.3 and \
+           not full:
             return True
 
         _job_table = []  # List of tuples (lifetime, job)
         for _jid, _job in self.__jobs.items():
+            if _job.valid_data['service'] != service:
+                continue
             # Get protection interval
-            _protect_dt = self.validator.services[
-                _job.valid_data['service']].min_lifetime
+            _protect_dt = _service.min_lifetime
             _dt = timedelta(hours=_protect_dt)
             _state = _job.get_state()
             _now = datetime.now()
@@ -601,19 +640,29 @@ class JobManager(object):
         # Revers sort the table - oldest first
         _job_table = sorted(_job_table, reverse=True)
         # We are aiming at 80% quota utilisation
-        _water_mark = _service.quota * 0.8 * 1000000
+        _water_mark = _service.quota * 0.8 * g_1M
+        if full:  # Remove all possible jobs
+            _water_mark = 0
         # Remove oldest jobs first until water mark is reached
         for _item in _job_table:
             _job = _item[1]
-            _service.remove_job(_job)
             _job.delete()
+            _service.remove_job_proxy(_job)
             if _service.current_size < _water_mark:
                 break
 
-        if _service.current_size + delta*1000000 < _service.quota*1000000:
-            return True
-        else:
+        # Hard quota is set at 130% of quota
+        # If hard quota is exceed no new jobs can be submitted until disk space
+        # is actually freed by check_deleted_jobs ...
+        if _service.real_size > _service.qouta * g_1M * 1.3:
+            logger.error("@JManager - Hard quota reached for service: %s" %
+                         service)
             return False
+
+        if _service.current_size + delta*g_1M < _service.quota*g_1M:
+            return True
+
+        return False
 
     def submit(self, job):
         """
@@ -622,14 +671,12 @@ class JobManager(object):
         :param job: The Job object to submit.
         :return: True on success, False otherwise.
         """
-
-        if self.validator.validate(job):  # Validate input
-            # During validation default values are set in Job.valid_data
-            # Now we can access scheduler selected for current Job
-            _scheduler = self.schedulers[job.valid_data['scheduler']]
-            # Ask scheduler to generate scripts and submit the job
-            if _scheduler.generate_scripts(job):
-                return _scheduler.submit(job)
+        # During validation default values are set in Job.valid_data
+        # Now we can access scheduler selected for current Job
+        _scheduler = self.schedulers[job.valid_data['scheduler']]
+        # Ask scheduler to generate scripts and submit the job
+        if _scheduler.generate_scripts(job):
+            return _scheduler.submit(job)
 
         return False
 
