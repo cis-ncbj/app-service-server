@@ -596,6 +596,7 @@ class JobManager(object):
         """
         # Get Service instance
         _service = self.services[service]
+        _start_size = _service.current_size
 
         # Check quota - size is stored in bytes while quota and delta in MBs
         if _service.current_size + delta * g_1M < _service.qouta * g_1M and \
@@ -658,6 +659,11 @@ class JobManager(object):
             logger.error("@JManager - Hard quota reached for service: %s" %
                          service)
             return False
+
+        logger.info(
+            "@JManager - Garbage collect reclaimed %s MB of disk space." %
+            _start_size - _service.current_size
+        )
 
         if _service.current_size + delta*g_1M < _service.quota*g_1M:
             return True
