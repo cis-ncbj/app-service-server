@@ -21,7 +21,6 @@ from Config import conf
 version = "0.2"
 
 logger = logging.getLogger(__name__)
-g_1M = 1000000
 
 
 class Job(object):
@@ -71,8 +70,6 @@ class Job(object):
                      exc_info=True)
             return None
 
-        self.calculate_size()
-
     def get_size(self):
         """
         Get the size of job output directory.
@@ -102,6 +99,8 @@ class Job(object):
             postprocessing,
         * killed:
             job execution was stopped by an user,
+        * delete:
+            job is scheduled for removal
         """
 
         return self.__state
@@ -118,7 +117,7 @@ class Job(object):
         if new_state not in conf.service_states:
             raise Exception('Unknown job state %s.' % new_state)
 
-        self.get_state()
+        self.get_state()  # TODO - check_state ???
 
         if self.__state == new_state:
             return
@@ -199,24 +198,6 @@ class Job(object):
 
         logger.info("Job %s finished: %s" % (self.id, state))
 
-    def delete(self):
-        """
-        Mark job for removal.
-
-        Active jobs will be killed. All data files including output files will
-        be removed.
-        """
-
-        try:
-            # Mark new state in the shared file system
-            os.symlink(
-                os.path.join(conf.gate_path_jobs, self.id),
-                os.path.join(conf.gate_path_delete, self.id)
-            )
-        except:
-            logger.error("@Job - Cannot mark job %s for removal." % self.id,
-                         exc_info=True)
-
     def calculate_size(self):
         """
         Calculate size of output directory of the job if it exists.
@@ -228,17 +209,17 @@ class Job(object):
             return
 
         try:
-            # Check taht output dir exists
-            _name = os.path.join(conf.gate_path_jobs, self.id)
+            # Check that output dir exists
+            _name = os.path.join(conf.gate_path_output, self.id)
             if not os.path.exists(_name):
                 return
 
             # Use /usr/bin/du as os.walk is very slow
-            _proc = Popen(u'/usr/bin/du -sb ' + _name,
-                          stdout=PIPE, stderr=STDOUT)
+            _opts = [u'/usr/bin/du', u'-sb', _name]
+            _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()
             # Hopefully du returned meaningful result
-            _size = "\s".split(_output[0])[0]
+            _size = _output[0].split()[0]
             # Check return code. If du was not killed by signal Popen will
             # not rise an exception
             if _proc.returncode != 0:
@@ -254,7 +235,8 @@ class Job(object):
             )
             return
 
-        self.__size = _size
+        self.__size = int(_size)
+        logger.debug("@Job - Job output size calculated: %s" % self.__size)
 
     def __check_state(self):
         """
@@ -265,7 +247,9 @@ class Job(object):
         allow to reload them.
         """
 
-        if os.path.exists(os.path.join(conf.gate_path_aborted, self.id)):
+        if os.path.exists(os.path.join(conf.gate_path_delete, self.id)):
+            self.__state = 'delete'
+        elif os.path.exists(os.path.join(conf.gate_path_aborted, self.id)):
             self.__state = 'aborted'
         elif os.path.exists(os.path.join(conf.gate_path_killed, self.id)):
             self.__state = 'killed'
@@ -310,8 +294,12 @@ class JobManager(object):
         self.__jobs = {}
         # State of the job queue
         self.__queue_running = True
-        # Warning counter
-        self.__warning_counter = 0
+        # Size of service output data last time quota was exceeded
+        self.__last_service_size = {}
+        # Warning counter - quota
+        self.__w_counter_quota = {}
+        for _s in self.services.keys():
+            self.__w_counter_quota[_s] = 0
 
         # Load existing jobs
         _list = os.listdir(conf.gate_path_jobs)
@@ -385,27 +373,36 @@ class JobManager(object):
             if not self.validator.validate(_job):  # Validate input
                 continue
 
-            _service = self.services[_job.valid_data['service']]
-            if not self.collect_garbage(_service, _service.config['job_size']):
-                if self.__warning_counter < 100:
-                    logger.warning(
-                        "@JManager - Cannot collect garbage for service: %s" %
-                        _job.valid_data['service']
-                    )
-                    self.__warning_counter += 1
+            _service_name = _job.valid_data['service']
+            if not self.collect_garbage(_service_name):
+                if self.__w_counter_quota[_service_name] < \
+                   6 * 60 * 60 / conf.config_sleep_time:
+                    self.__w_counter_quota[_service_name] += 1
+                    if self.services[_service_name].current_size != \
+                       self.__last_service_size[_service_name]:
+                        logger.warning(
+                            "@JManager - Cannot collect garbage for service: "
+                            "%s" % _job.valid_data['service']
+                        )
+                        self.__last_service_size[_service_name] = \
+                            self.services[_service_name].current_size
                 else:
                     logger.error(
                         "@JManager - Cannot collect garbage for service: %s. "
                         "Message repeated 100 times." %
                         _job.valid_data['service']
                     )
-                    self.__warning_counter = 0
+                    self.__w_counter_quota[_service_name] = 0
                 continue
+            else:
+                self.__last_service_size[_service_name] = \
+                    self.services[_service_name].current_size
+                self.__w_counter_quota[_service_name] = 0
 
             try:
                 if self.submit(_job):
                     _job.set_state('queued')
-                    _service.add_job_proxy(_job)
+                    self.services[_service_name].add_job_proxy(_job)
                 # Submit can return False when queue is full. Do not terminate
                 # job here so it can be resubmitted next time. If submission
                 # failed scheduler should have set job state to Aborted anyway.
@@ -503,7 +500,6 @@ class JobManager(object):
                     _name = os.path.join(_path, _jid)
                     if os.path.exists(_name):
                         os.unlink(_name)
-                os.unlink(os.path.join(conf.gate_path_delete, _jid))
                 # Remove job file after symlinks (otherwise os.path.exists
                 # fails on symlinks)
                 os.unlink(os.path.join(conf.gate_path_jobs, _jid))
@@ -549,7 +545,8 @@ class JobManager(object):
             if _job is None or not _job.valid_data:
                 continue
 
-            _delete_dt = self.services[_job.valid_data['service']].max_lifetime
+            _delete_dt = self.services[
+                _job.valid_data['service']].config['max_lifetime']
             if _delete_dt == 0:
                 continue
             _state = _job.get_state()
@@ -578,14 +575,14 @@ class JobManager(object):
             if _path_time < _now:
                 logger.info("@JManager - Job reached storage time limit. "
                             "Sheduling for removal.")
-                _job.delete()
+                _job.set_state('delete')
 
-    def collect_garbage(self, service, delta=0, full=False):
+    def collect_garbage(self, service, full=False):
         """
         Check if service quota is not exceeded. If yes remove oldest finished
         jobs.
 
-        @param service - Service object for which garbage collection should be
+        @param service - Service name for which garbage collection should be
                          performed.
         @param delta - Perform the quota check as if current disk usage was
                        increased by delta MBs.
@@ -597,20 +594,29 @@ class JobManager(object):
         # Get Service instance
         _service = self.services[service]
         _start_size = _service.current_size
+        _delta = _service.config['job_size']
+        _quota = _service.config['quota']
 
         # Check quota - size is stored in bytes while quota and delta in MBs
-        if _service.current_size + delta * g_1M < _service.qouta * g_1M and \
-           _service.real_size < _service.qouta * g_1M * 1.3 and \
+        if _service.current_size + _delta < _quota and \
+           _service.real_size < _quota * 1.3 and \
            not full:
             return True
 
+        logger.debug("@JManager - Quota for service %s exceeded." % service)
+        T.verbose("Quota: %s" % _quota)
+        T.verbose("Delta: %s" % _delta)
+        T.verbose("Size: %s" % _service.current_size)
+
         _job_table = []  # List of tuples (lifetime, job)
         for _jid, _job in self.__jobs.items():
+            if not _job.valid_data:
+                continue
             if _job.valid_data['service'] != service:
                 continue
             # Get protection interval
-            _protect_dt = _service.min_lifetime
-            _dt = timedelta(hours=_protect_dt)
+            _protect_dt = _service.config['min_lifetime']
+            _dt = timedelta(minutes=_protect_dt)
             _state = _job.get_state()
             _now = datetime.now()
             _path = None
@@ -624,7 +630,7 @@ class JobManager(object):
                 # Jobs that are too young and are still in protection interval
                 # are skipped
                 _path_time = datetime.fromtimestamp(os.path.getctime(_path))
-                if _path_time + _dt < _now:
+                if _path_time + _dt > _now:
                     continue
 
                 # Calculate lifetime
@@ -641,31 +647,38 @@ class JobManager(object):
         # Revers sort the table - oldest first
         _job_table = sorted(_job_table, reverse=True)
         # We are aiming at 80% quota utilisation
-        _water_mark = _service.quota * 0.8 * g_1M
+        _water_mark = _quota * 0.8
         if full:  # Remove all possible jobs
             _water_mark = 0
         # Remove oldest jobs first until water mark is reached
         for _item in _job_table:
-            _job = _item[1]
-            _job.delete()
-            _service.remove_job_proxy(_job)
+            try:
+                _job = _item[1]
+                _job.set_state('delete')
+                _service.remove_job_proxy(_job)
+                logger.debug("@JManager - Job garbage collected: %s." %
+                             _job.id)
+            except:
+                logger.warning("@JManager - unable schedule job for removal.",
+                               exc_info=True)
             if _service.current_size < _water_mark:
                 break
 
         # Hard quota is set at 130% of quota
         # If hard quota is exceed no new jobs can be submitted until disk space
         # is actually freed by check_deleted_jobs ...
-        if _service.real_size > _service.qouta * g_1M * 1.3:
+        if _service.real_size > _quota * 1.3:
             logger.error("@JManager - Hard quota reached for service: %s" %
                          service)
             return False
 
-        logger.info(
-            "@JManager - Garbage collect reclaimed %s MB of disk space." %
-            _start_size - _service.current_size
-        )
+        if _start_size != _service.current_size:
+            logger.info(
+                "Garbage collect reclaimed %s MB of disk space." %
+                ((_start_size - _service.current_size) / 1000000.0)
+            )
 
-        if _service.current_size + delta*g_1M < _service.quota*g_1M:
+        if _service.current_size + _delta < _quota:
             return True
 
         return False

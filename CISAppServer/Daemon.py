@@ -211,8 +211,9 @@ class DaemonRunner(object):
             logging.root.removeHandler(_h)
 
             self.job_manager.run()
-        except Exception, e:
-            logger.error(u"@Daemon - Shutdown, exception cought: %s" % e)
+        except Exception:
+            logger.error(u"@Daemon - Shutdown, exception cought.",
+                         exc_info=True)
             logging.shutdown()
             sys.exit(1)
 

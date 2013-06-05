@@ -84,8 +84,12 @@ class Service(dict):
         self.__job_proxies = []
         self.__jobs = []
 
+        # Covert quota and job_size to bytes from MB
+        self.config['quota'] = self.config['quota'] * 1000000
+        self.config['job_size'] = self.config['job_size'] * 1000000
+
     def add_job_proxy(self, job):
-        if job.id in self.__job_proxies.keys():
+        if job.id in self.__job_proxies:
             logger.error("@Service - Job proxy already exists: %s" % job.id)
             return
 
@@ -93,27 +97,28 @@ class Service(dict):
         self.__job_proxies.append(job.id)
 
     def remove_job_proxy(self, job):
-        if job.id in self.__job_proxies.keys():
+        if job.id in self.__job_proxies:
             self.__job_proxies.remove(job.id)
             self.current_size -= job.get_size()
 
     def update_job(self, job):
-        if job.id in self.__jobs.keys():
+        if job.id in self.__jobs:
             logger.error("@Service - Job already exists: %s" % job.id)
             return
-        job.calculate_size()
-        if job.id in self.__job_proxies.keys():
+        self.__jobs.append(job.id)
+        if job.id in self.__job_proxies:
             self.current_size -= self.config['job_size']
         else:
             self.__job_proxies.append(job.id)
+        job.calculate_size()
         self.current_size += job.get_size()
         self.real_size += job.get_size()
 
     def remove_job(self, job):
-        if job.id not in self.__jobs.keys():
+        if job.id not in self.__jobs:
             logger.error("@Service - Job does not exist: %s" % job.id)
             return
-        if job.id in self.__job_proxies.keys():
+        if job.id in self.__job_proxies:
             self.__job_proxies.remove(job.id)
             self.current_size -= job.get_size()
         self.__jobs.remove(job.id)

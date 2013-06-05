@@ -122,6 +122,7 @@ class Config(dict):
         self.service_states = (
             'waiting', 'queued', 'running',
             'done', 'failed', 'aborted', 'killed',
+            'delete'
         )
         #: Reserved key names for job parameters
         self.service_reserved_keys = ('service', 'name', 'scheduler', 'queue')
@@ -152,8 +153,6 @@ class Config(dict):
         self.gate_path_jobs = None
         #: Path were jobs exit status is stored
         self.gate_path_exit = None
-        #: Path were where jobs shceduled for removal are symlinked
-        self.gate_path_delete = None
         #: Path were where waiting jobs are symlinked
         self.gate_path_waiting = None
         #: Path were where queued jobs are symlinked
@@ -168,6 +167,8 @@ class Config(dict):
         self.gate_path_aborted = None
         #: Path were where killed jobs are symlinked
         self.gate_path_killed = None
+        #: Path were where jobs shceduled for removal are symlinked
+        self.gate_path_delete = None
         #: Dictionary of job states with corresponding paths
         self.gate_path = {
             "waiting": None,
@@ -177,6 +178,7 @@ class Config(dict):
             "failed": None,
             "aborted": None,
             "killed": None,
+            "delete": None,
         }
 
     def load(self, conf_name=None):
@@ -229,7 +231,6 @@ class Config(dict):
         # Generate subdir names
         self.gate_path_jobs = os.path.join(self.gate_path_shared, 'jobs')
         self.gate_path_exit = os.path.join(self.gate_path_shared, 'exit')
-        self.gate_path_delete = os.path.join(self.gate_path_shared, 'delete')
 
         # Generate job state subdirs
         self.gate_path_waiting = os.path.join(self.gate_path_shared, 'waiting')
@@ -239,6 +240,7 @@ class Config(dict):
         self.gate_path_failed = os.path.join(self.gate_path_shared, 'failed')
         self.gate_path_aborted = os.path.join(self.gate_path_shared, 'aborted')
         self.gate_path_killed = os.path.join(self.gate_path_shared, 'killed')
+        self.gate_path_delete = os.path.join(self.gate_path_shared, 'delete')
         self.gate_path = {
             "waiting": self.gate_path_waiting,
             "queued": self.gate_path_queued,
@@ -247,6 +249,7 @@ class Config(dict):
             "failed": self.gate_path_failed,
             "aborted": self.gate_path_aborted,
             "killed": self.gate_path_killed,
+            "delete": self.gate_path_delete,
         }
 
         # Create those paths if they do not exist
