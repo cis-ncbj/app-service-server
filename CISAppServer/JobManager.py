@@ -582,14 +582,14 @@ class JobManager(object):
         Check if service quota is not exceeded. If yes remove oldest finished
         jobs.
 
-        @param service - Service name for which garbage collection should be
-                         performed.
-        @param delta - Perform the quota check as if current disk usage was
-                       increased by delta MBs.
-        @param full - If True force garbage collection even if disk usage is
-                      not above alloted quota. In addition removes all jobs
-                      older than min job life time.
-        @return True if quota is not reached or garbage collection succeeded.
+        :param service: Service name for which garbage collection should be
+            performed,
+        :param delta: Perform the quota check as if current disk usage was
+            increased by delta MBs.
+        :param full: If True force garbage collection even if disk usage is
+            not above alloted quota. In addition removes all jobs older than
+            min job life time.
+        :return: True if quota is not reached or garbage collection succeeded.
         """
         # Get Service instance
         _service = self.services[service]
