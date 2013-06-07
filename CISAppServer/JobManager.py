@@ -616,7 +616,7 @@ class JobManager(object):
                 continue
             # Get protection interval
             _protect_dt = _service.config['min_lifetime']
-            _dt = timedelta(minutes=_protect_dt)
+            _dt = timedelta(hours=_protect_dt)
             _state = _job.get_state()
             _now = datetime.now()
             _path = None

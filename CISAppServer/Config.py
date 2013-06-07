@@ -45,15 +45,15 @@ class Config(dict):
 
         # Define default values
         self.config_file = None  #: Config file name
-        #: Sleep interval between job status queries
+        #: Sleep interval in seconds between job status queries
         self.config_sleep_time = 3
         #: Every n-th status query dump the progress logs
         self.config_progress_step = 2
         #: Interval in hours after which job is automatically removed with all
-        #: data
+        #: data (supports fractions)
         self.config_delete_interval = 48
         #: Interval in hours after which job is automatically killed if in
-        #: running state
+        #: running state (supports fractions)
         self.config_kill_interval = 24
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
@@ -127,14 +127,14 @@ class Config(dict):
         )
         #: Reserved key names for job parameters
         self.service_reserved_keys = ('service', 'name', 'scheduler', 'queue')
-        #: Default job minimum lifetime in minutes. Jobs that are younger then
-        #: this cannot be removed by garbage collector
-        self.service_min_lifetime = 120
-        #: Default job maximum lifetime in minutes. Jobs that are older then
-        #: this will be removed by garbage collector. Setting this to zero
-        #: means jobs can be immortal (at least until service quota is
-        #: exceeded)
-        self.service_max_lifetime = 2880
+        #: Default job minimum lifetime in hours (supports fractions). Jobs
+        #: that are younger then this cannot be removed by garbage collector
+        self.service_min_lifetime = 2
+        #: Default job maximum lifetime in hours (supports fractions). Jobs
+        #: that are older then this will be removed by garbage collector.
+        #: Setting this to zero means jobs can be immortal (at least until
+        #: service quota is exceeded)
+        self.service_max_lifetime = 24
         #: Default maximum number of concurrent jobs allowed per dervice
         self.service_max_jobs = 80
         #: Defaul maximum disk size used by service output files in MB
