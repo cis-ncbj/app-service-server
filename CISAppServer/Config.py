@@ -5,6 +5,7 @@ Global configuration for CISAppServer.
 """
 
 import os
+import errno
 import logging
 import re
 try:
@@ -273,7 +274,7 @@ class Config(dict):
         ]
         for _path in _mkdirs:
             if not os.path.isdir(self[_path]):
-                os.mkdir(self[_path])
+                self.mkdir_p(self[_path])
 
         logger.log(VERBOSE, self)
 
@@ -316,6 +317,14 @@ class Config(dict):
 
         # Return json file
         return json.loads(content)
+
+    def mkdir_p(self, path):
+        try:
+            os.makedirs(path)
+        except OSError as exc: # Python >2.5
+            if exc.errno == errno.EEXIST and os.path.isdir(path):
+                pass
+            else: raise
 
 
 #: Global Config class instance. Use it to access the CISAppGateway
