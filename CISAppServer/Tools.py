@@ -438,7 +438,26 @@ class Scheduler(object):
         :param job: :py:class:`Job` instance
         :return: True on success and False otherwise.
         """
-        raise NotImplementedError
+        # Make sure all files in the output directory are world readable - so
+        # that apache can actually serve them
+        try:
+            _out_dir = os.path.join(conf.gate_path_output, job.id)
+            if os.path.isdir(_out_dir):
+                logger.debug(
+                    '@Scheduler - Make output directory world readable')
+                os.chmod(_out_dir, stat.S_IROTH | stat.S_IXOTH)
+                for _root, _dirs, _files in os.walk(_out_dir):
+                    for _dir in _dirs:
+                        _name = os.path.join(_root, _dir)
+                        os.chmod(_name, os.stat(_name).st_mode |
+                                 stat.S_IROTH | stat.S_IXOTH)
+                    for _file in _files:
+                        _name = os.path.join(_root, _file)
+                        os.chmod(_name, os.stat(_name).st_mode |
+                                 stat.S_IROTH)
+        except:
+            job.die("@Scheduler - Unable to correct permissions for job "
+                    "output directory %s" % _work_dir, exc_info=True)
 
     def generate_scripts(self, job):
         """
