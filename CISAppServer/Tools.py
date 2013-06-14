@@ -445,16 +445,19 @@ class Scheduler(object):
             if os.path.isdir(_out_dir):
                 logger.debug(
                     '@Scheduler - Make output directory world readable')
-                os.chmod(_out_dir, stat.S_IROTH | stat.S_IXOTH)
+                os.chmod(_out_dir, os.stat(_out_dir).st_mode |
+                         stat.S_IRUSR | stat.S_IXUSR |
+                         stat.S_IROTH | stat.S_IXOTH)
                 for _root, _dirs, _files in os.walk(_out_dir):
                     for _dir in _dirs:
                         _name = os.path.join(_root, _dir)
                         os.chmod(_name, os.stat(_name).st_mode |
+                                 stat.S_IRUSR | stat.S_IXUSR |
                                  stat.S_IROTH | stat.S_IXOTH)
                     for _file in _files:
                         _name = os.path.join(_root, _file)
                         os.chmod(_name, os.stat(_name).st_mode |
-                                 stat.S_IROTH)
+                                 stat.S_IRUSR | stat.S_IROTH)
         except:
             job.die("@Scheduler - Unable to correct permissions for job "
                     "output directory %s" % _work_dir, exc_info=True)
