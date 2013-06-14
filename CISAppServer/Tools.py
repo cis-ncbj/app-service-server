@@ -839,6 +839,7 @@ class PbsScheduler(Scheduler):
                 shutil.move(_out_dir, _dump_dir)
                 shutil.rmtree(_dump_dir, ignore_errors=True)
             shutil.move(_work_dir, conf.gate_path_output)
+            super(PbsScheduler, self).finalise(job)
             logger.info("Job %s output retrived." % job.id)
         except:
             _job_state = 'abort'
