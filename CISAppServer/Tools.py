@@ -67,6 +67,7 @@ class Service(dict):
         self.config = {
             'min_lifetime': conf.service_min_lifetime,
             'max_lifetime': conf.service_max_lifetime,
+            'max_runtime': conf.service_max_runtime,
             'max_jobs': conf.service_max_jobs,
             'quota': conf.service_quota,
             'job_size': conf.service_job_size
@@ -170,6 +171,10 @@ class Validator(object):
         if job.valid_data:
             return True
 
+        if not job.data:
+            job.die("@Validator - Empty data dictionary")
+            return False
+
         _data = job.data
 
         # Check if data contains service attribute and that such service was
@@ -180,6 +185,8 @@ class Validator(object):
             job.die("@Validator - Not supported service: %s." %
                     _data['service'], err=False)
             return False
+
+        job.service = _data['service']
 
         # Load defaults
         _variables = {
@@ -476,8 +483,7 @@ class Scheduler(object):
         """
 
         # Input directory
-        _script_dir = os.path.join(conf.service_path_data,
-                                   job.valid_data['service'])
+        _script_dir = os.path.join(conf.service_path_data, job.service)
         # Output directory
         _work_dir = os.path.join(self.work_path, job.id)
 
@@ -490,7 +496,7 @@ class Scheduler(object):
         # Verify that input dir contains "pbs.sh" script
         if not os.path.isfile(os.path.join(_script_dir, 'pbs.sh')):
             job.die("@Scheduler - Missing \"pbs.sh\" script for service %s." %
-                    job.valid_data['service'])
+                    job.service)
             return False
 
         # Create output dir

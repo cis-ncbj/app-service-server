@@ -9,14 +9,6 @@
     // Every n-th status query dump the progress logs (default: 2)
     //"config_progress_step" : 2,
     //
-    // Interval in hours after which job is automatically removed with all data
-    // (default: 48)
-    //"config_delete_interval" : 48,
-    //
-    // Interval in hours after which job is automatically killed if in running
-    // state (default: 24)
-    //"config_kill_interval" : 24,
-    //
     // ***************
     // Daemon settings
     // ***************
@@ -73,6 +65,18 @@
     // Path with services scripts and input files, can be relative to Daemon
     // working directory (default: Services/Data)
     //"service_path_data" : "Services/Data"
+    //
+    // Default interval in hours when job will not be removed by garbage
+    // collector (default: 2)
+    //"service_min_lifetime" : 2,
+    //
+    // Default interval in hours after which job is automatically removed with
+    // all data (default: 24)
+    //"service_max_lifetime" : 24,
+    //
+    // Default interval in hours after which job is automatically killed if in
+    // running state (default: 12)
+    //"service_max_runtime" : 12,
     //
     // ****************
     // Gateway settings

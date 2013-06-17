@@ -49,12 +49,6 @@ class Config(dict):
         self.config_sleep_time = 3
         #: Every n-th status query dump the progress logs
         self.config_progress_step = 2
-        #: Interval in hours after which job is automatically removed with all
-        #: data (supports fractions)
-        self.config_delete_interval = 48
-        #: Interval in hours after which job is automatically killed if in
-        #: running state (supports fractions)
-        self.config_kill_interval = 24
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
@@ -135,6 +129,10 @@ class Config(dict):
         #: Setting this to zero means jobs can be immortal (at least until
         #: service quota is exceeded)
         self.service_max_lifetime = 24
+        #: Default job maximum running time in hours (supports fractions). Jobs
+        #: that are in running state longer then this will be killed and
+        #: removed by garbage collector.
+        self.service_max_runtime = 12
         #: Default maximum number of concurrent jobs allowed per dervice
         self.service_max_jobs = 80
         #: Defaul maximum disk size used by service output files in MB

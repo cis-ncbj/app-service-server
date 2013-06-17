@@ -44,6 +44,8 @@ class Job(object):
         """
         #: Unique job ID string.
         self.id = job_id
+        #: Jobs' Service
+        self.service = None
         #: Job parameters as specified in job request.
         self.data = {}
         #: Job parameters after validation
@@ -238,6 +240,10 @@ class Job(object):
         self.__size = int(_size)
         logger.debug("@Job - Job output size calculated: %s" % self.__size)
 
+    def compact(self):
+        self.data = {}
+        self.valid_data = {}
+
     def __check_state(self):
         """
         Query the shared storage to identify current job state.
@@ -315,11 +321,14 @@ class JobManager(object):
                 _job.die("@JManager - Job ID already used: %s" % _jid)
 
             self.__jobs[_jid] = _job
-            # Make sure Job.valid_data is present
+            # Make sure Job.service and Job.valid_data is present
             self.validator.validate(_job)
             # Update service quota
-            if _job.get_state in ['done', 'failed', 'killed']:
-                self.services[_job.valid_data['service']].update_job(_job)
+            if os.path.isdir(os.path.join(conf.gate_path_output, _jid)):
+                self.services[_job.service].update_job(_job)
+            # Reduce memory footprint
+            if _job.get_state() in ('done', 'failed', 'killed', 'aborted'):
+                _job.compact()
 
     def get_job(self, job_id, create=False):
         """
@@ -373,7 +382,7 @@ class JobManager(object):
             if not self.validator.validate(_job):  # Validate input
                 continue
 
-            _service_name = _job.valid_data['service']
+            _service_name = _job.service
             if not self.collect_garbage(_service_name):
                 if self.__w_counter_quota[_service_name] < \
                    6 * 60 * 60 / conf.config_sleep_time:
@@ -382,7 +391,7 @@ class JobManager(object):
                        self.__last_service_size[_service_name]:
                         logger.warning(
                             "@JManager - Cannot collect garbage for service: "
-                            "%s" % _job.valid_data['service']
+                            "%s" % _job.service
                         )
                         self.__last_service_size[_service_name] = \
                             self.services[_service_name].current_size
@@ -390,7 +399,7 @@ class JobManager(object):
                     logger.error(
                         "@JManager - Cannot collect garbage for service: %s. "
                         "Message repeated 100 times." %
-                        _job.valid_data['service']
+                        _job.service
                     )
                     self.__w_counter_quota[_service_name] = 0
                 continue
@@ -452,13 +461,19 @@ class JobManager(object):
 
                 # Get Job status
                 _status = _scheduler.status(_job)
-                if _status == 'done' or _status == 'killed':
+                if _status in ('done', 'failed', 'killed'):
                     # Found finished job - finalise it
                     logger.debug('@JManager - Detected finished job: %s.' %
                                  _jid)
                     _scheduler.finalise(_job)
-                    self.services[_job.valid_data['service']].update_job(_job)
-                elif _status == 'unknown':
+                if _status in ('done', 'failed', 'killed', 'aborted'):
+                    # Update service quota
+                    if os.path.isdir(
+                            os.path.join(conf.gate_path_output, _jid)):
+                        self.services[_job.service].update_job(_job)
+                    # Reduce memory footprint
+                    _job.compact()
+                if _status == 'unknown':
                     logger.warning(
                         "@JManager - Scheduler returned 'unknown' status "
                         "for job %s" % _jid
@@ -517,8 +532,8 @@ class JobManager(object):
                 if os.path.isdir(_output):
                     shutil.move(_output, _dump)
                     shutil.rmtree(_dump, onerror=T.rmtree_error)
-                # Update service quota status
-                self.services[_job.valid_data['service']].remove_job(_job)
+                    # Update service quota status
+                    self.services[_job.service].remove_job(_job)
             except:
                 logger.error("Cannot remove job output %s." % _jid,
                              exc_info=True)
@@ -542,11 +557,10 @@ class JobManager(object):
 
         for _jid in _queue:
             _job = self.get_job(_jid, create=True)
-            if _job is None or not _job.valid_data:
+            if _job is None or _job.service is None:
                 continue
 
-            _delete_dt = self.services[
-                _job.valid_data['service']].config['max_lifetime']
+            _delete_dt = self.services[_job.service].config['max_lifetime']
             if _delete_dt == 0:
                 continue
             _state = _job.get_state()
@@ -560,11 +574,16 @@ class JobManager(object):
                     _path = os.path.join(conf.gate_path_output, _jid)
                 elif _state == 'running':
                     _path = os.path.join(conf.gate_path_running, _jid)
-                    _dt = timedelta(hours=conf.config_kill_interval)
+                    _delete_dt = self.services[_job.service].config['max_runtime']
+                    _dt = timedelta(hours=_delete_dt)
                 else:
                     continue
 
                 _path_time = datetime.fromtimestamp(os.path.getctime(_path))
+                T.verbose("@JManager - Removal dt: %s" % _dt)
+                T.verbose("@JManager - Path time: %s" % _path_time)
+                T.verbose("@JManager - Current time: %s" % _now)
+                T.verbose("@JManager - Time diff: %s" % (_path_time + _dt - _now))
                 _path_time += _dt
             except:
                 logger.error(
@@ -610,9 +629,7 @@ class JobManager(object):
 
         _job_table = []  # List of tuples (lifetime, job)
         for _jid, _job in self.__jobs.items():
-            if not _job.valid_data:
-                continue
-            if _job.valid_data['service'] != service:
+            if _job.service != service:
                 continue
             # Get protection interval
             _protect_dt = _service.config['min_lifetime']
@@ -733,3 +750,4 @@ class JobManager(object):
             self.check_running_jobs()
             self.check_old_jobs()
             self.check_deleted_jobs()
+
