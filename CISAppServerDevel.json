@@ -1,0 +1,104 @@
+{
+    // ***************
+    // Server settings
+    // ***************
+    //
+    // Sleep interval in seconds between job status queries (dafault: 3)
+    //"config_sleep_time" : 3,
+    //
+    // Every n-th status query dump the progress logs (default: 2)
+    //"config_progress_step" : 2,
+    //
+    // ***************
+    // Daemon settings
+    // ***************
+    //
+    // Daemon mode pid file path (default: /tmp/CISAppServer.pid)
+    "daemon_path_pidfile" : "/var/run/app-server/app-server-devel.pid",
+    //
+    // Timeout in seconds for daemon mode pid file acquisition.
+    // 0: do not timeout
+    // -1: timeout immediatelly
+    // (default: -1)
+    //"daemon_pidfile_timeout" : -1,
+    //
+    // Working directory of daemon, accepts only valid string paths
+    // (default: $PWD)
+    "daemon_path_workdir" : "/tmp",
+    //
+    // ****************
+    // Logging settings
+    // ****************
+    //
+    // Logging level: VERBOSE, DEBUG, INFO, WARNING, ERROR (default: INFO)
+    //"log_level" : "INFO",
+    //
+    // Log output file name (default: /tmp/CISAppServer.log)
+    "log_output" : "/var/log/app-server/app-server-devel.log",
+    //
+    // ************
+    // PBS settings
+    // ************
+    //
+    // Path where PBS backend will store job IDs, can be relative to Daemon
+    // working directory (default: PBS/Queue)
+    "pbs_path_queue" : "/var/spool/app-server-devel/PbsQueue",
+    //
+    // Path where PBS backeng will create job working directories, can be
+    // relative to Daemon working directory (default: PBS/Scratch)
+    "pbs_path_work" : "/mnt/home/apprunner/Scratch/AppServerDevel",
+    //
+    // Name of default PBS queue (default: short)
+    "pbs_default_queue" : "test_slc6",
+    //
+    // Maximum number of concurent PBS jobs (default: 100)
+    //"pbs_max_jobs" : 100,
+    //
+    // **********************
+    // Services/Apps settings
+    // **********************
+    //
+    // Path with services configuration files, can be relative to Daemon
+    // working directory (default: Services)
+    "service_path_conf" : "/opt/WebServicesDevel/AppServer/Services",
+    //
+    // Path with services scripts and input files, can be relative to Daemon
+    // working directory (default: Services/Data)
+    "service_path_data" : "/opt/WebServicesDevel/AppServer/Services/Data",
+    //
+    // Default interval in hours when job will not be removed by garbage
+    // collector (default: 2)
+    //"service_min_lifetime" : 2,
+    //
+    // Interval in hours after which job is automatically removed with all data
+    // (default: 24)
+    //"service_max_lifetime" : 24,
+    //
+    // Interval in hours after which job is automatically killed if in running
+    // state (default: 12)
+    //"service_max_runtime" : 12,
+    //
+    // ****************
+    // Gateway settings
+    // ****************
+    //
+    // Path to the shared storage used as communication medium with AppGateway,
+    // can be relative to Daemon working directory (default: Shared)
+    "gate_path_shared" : "/mnt/app_gw/Devel/Shared",
+    //
+    // Path where jobs output will be stored, can be relative to Daemon working
+    // directory (default: Output)
+    "gate_path_output" : "/mnt/app_gw/Devel/Output",
+    //
+    // Path where jobs output is moved before removal (aleviates problems
+    // with files that are still in use), can be relative to Daemon
+    // working directory (default: Dump)
+    "gate_path_dump" : "/mnt/app_gw/Devel/Dump",
+    //
+    // ***
+    // END
+    // ***
+    //
+    // Dummy item just to make json parser always happy :-D
+    "DUMMY" : 0
+}
