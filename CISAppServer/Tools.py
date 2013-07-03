@@ -694,6 +694,9 @@ class PbsScheduler(Scheduler):
             job.die('@PBS - Unable to read PBS job ID', exc_info=True)
             return _status
 
+        #TODO Consider switch to two calls for whole queue instead of one per job:
+        # qstat -i -u apprunner - waiting
+        # qstat -r -u apprunner - running
         try:
             # Run qstat
             logger.debug("@PBS - Check job state")
@@ -727,14 +730,21 @@ class PbsScheduler(Scheduler):
                     _res = _m.group(1)
                     logger.debug("@PBS - Found job_state: %s" % _res)
                     try:
+                        # Jobs with status complete are done and should have
+                        # finished generating all output
+                        if _res == 'C':
+                            _done = 1
+                            break
                         # Consider running, exiting and complete as running
-                        if _res == 'R' or _res == 'C' or _res == 'E':
+                        elif _res == 'R' or _res == 'E':
                             _status = 'running'
                             job.set_state('running')
+                            break
                         # Other states are considered as queued
                         else:
                             _status = 'queued'
                             job.set_state('queued')
+                            break
                     except:
                         job.die("@PBS - Unable to set state of job %s" %
                                 job.id, exc_info=True)
@@ -742,11 +752,12 @@ class PbsScheduler(Scheduler):
 
         # When job is finished either epilogue was executed and status.dat is
         # present. Otherwise assume it was killed
-        elif os.path.isfile(os.path.join(_work_dir, 'status.dat')):
-            logger.debug("@PBS - Found job state: D")
-            _status = 'done'
-        else:
-            _status = 'killed'
+        if _done == 1:
+            if os.path.isfile(os.path.join(_work_dir, 'status.dat')):
+                logger.debug("@PBS - Found job state: D")
+                _status = 'done'
+            else:
+                _status = 'killed'
 
         return _status
 
