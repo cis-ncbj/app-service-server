@@ -13,8 +13,8 @@
         },
         "queue" : {
             "type" : "string",
-            "default" : "short",
-            "values" : ["short", "long"]
+            "default" : "test_slc6",
+            "values" : ["short", "long", "test_slc6"]
         }
     },
     "sets" : {}
