@@ -46,7 +46,7 @@
     //
     // Path where PBS backeng will create job working directories, can be
     // relative to Daemon working directory (default: PBS/Scratch)
-    "pbs_path_work" : "/mnt/home/kklimaszewski/Scratch/AppServer",
+    "pbs_path_work" : "/mnt/home/apprunner/AppServer",
     //
     // Name of default PBS queue (default: short)
     //"pbs_default_queue" : "short",
