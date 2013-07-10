@@ -302,31 +302,10 @@ class Validator(object):
                                (key, value))
                 return False
         elif service.variables[key]['type'] == 'int':
-            # Attribute of type int - check the format
             try:
-                if isinstance(value, str) or isinstance(value, unicode):
-                    # Value specified as string - check the format using python
-                    # builtin conversion
-                    _v = int(value)
-                elif not isinstance(value, int):
-                    # Value specified neither as int nor string - raise error
-                    raise ValueError("%s is not an int" % value)
-                else:
-                    _v = value
-            except ValueError:
-                logger.warning('@Validator - Value is not a proper int.',
-                               exc_info=True)
-                return False
-
-            # Check that atrribute value falls in allowed range
-            try:
-                if _v < service.variables[key]['values'][0] or \
-                        _v > service.variables[key]['values'][1]:
-                    logger.warning(
-                        "@Validator - Value not in allowed range: %s - %s" %
-                        (key, _v)
-                    )
-                    return False
+                return self.validate_int(key, value,
+                    service.variables[key]['values'][0],
+                    service.variables[key]['values'][1])
             except IndexError:
                 logger.error(
                     "@Validator - Badly defined range for variable:  %s" %
@@ -334,29 +313,26 @@ class Validator(object):
                 )
                 return False
         elif service.variables[key]['type'] == 'float':
-            # Attribute of type float - check the format
             try:
-                if isinstance(value, str) or isinstance(value, unicode):
-                    # Value specified as string - check the format using python
-                    # builtin conversion
-                    _v = float(value)
-                elif not isinstance(value, float):
-                    # Value specified neither as float nor string - raise error
-                    raise ValueError("%s is not a float" % value)
-                else:
-                    _v = value
-            except ValueError:
-                logger.warning('@Validator - Value is not a proper float',
-                               exc_info=True)
+                return self.validate_float(key, value,
+                    service.variables[key]['values'][0],
+                    service.variables[key]['values'][1])
+            except IndexError:
+                logger.error(
+                    "@Validator - Badly defined range for variable:  %s" %
+                    key
+                )
                 return False
-
-            # Check that atrribute value falls in allowed range
+        elif service.variables[key]['type'] == 'string_array':
+            if not isinstance(value, list) and isinstance(value, tuple):
+                logger.error(
+                    "@Validator - Value is not a proper array:  %s" % key
+                )
+                return False
             try:
-                if _v < service.variables[key]['values'][0] or \
-                        _v > service.variables[key]['values'][1]:
-                    logger.warning(
-                        "@Validator - Value not in allowed range: %s - %s" %
-                        (key, _v)
+                if len(value) > service.variables[key]['values'][0]:
+                    logger.error(
+                        "@Validator - Array  exceeds allowed length:  %s" % key
                     )
                     return False
             except IndexError:
@@ -365,6 +341,129 @@ class Validator(object):
                     key
                 )
                 return False
+            for _v in value:
+                if not _v in service.variables[key]['values'][1:]:
+                    logger.warning("@Validator - Value not allowed: %s - %s." %
+                                   (key, value))
+                    return False
+        elif service.variables[key]['type'] == 'int_array':
+            if not isinstance(value, list) and isinstance(value, tuple):
+                logger.error(
+                    "@Validator - Value is not a proper array:  %s" % key
+                )
+                return False
+            try:
+                if len(value) > service.variables[key]['values'][0]:
+                    logger.error(
+                        "@Validator - Array  exceeds allowed length:  %s" % key
+                    )
+                    return False
+            except IndexError:
+                logger.error(
+                    "@Validator - Badly defined range for variable:  %s" %
+                    key
+                )
+                return False
+            _min = 0
+            _max = 0
+            try:
+                _min = service.variables[key]['values'][1]
+                _max = service.variables[key]['values'][2]
+            except IndexError:
+                logger.error(
+                    "@Validator - Badly defined range for variable:  %s" %
+                    key
+                )
+                return False
+            for _v in values:
+                if not self.validate_int(key, _v, _min, _max):
+                    return False
+        elif service.variables[key]['type'] == 'float_array':
+            if not isinstance(value, list) and isinstance(value, tuple):
+                logger.error(
+                    "@Validator - Value is not a proper array:  %s" % key
+                )
+                return False
+            try:
+                if len(value) > service.variables[key]['values'][0]:
+                    logger.error(
+                        "@Validator - Array  exceeds allowed length:  %s" % key
+                    )
+                    return False
+            except IndexError:
+                logger.error(
+                    "@Validator - Badly defined range for variable:  %s" %
+                    key
+                )
+                return False
+            _min = 0
+            _max = 0
+            try:
+                _min = service.variables[key]['values'][1]
+                _max = service.variables[key]['values'][2]
+            except IndexError:
+                logger.error(
+                    "@Validator - Badly defined range for variable:  %s" %
+                    key
+                )
+                return False
+            for _v in value:
+                if not self.validate_float(key, _v, _min, _max):
+                    return False
+
+        return True
+
+    def validate_int(self, key, value, min, max):
+        # Attribute of type int - check the format
+        try:
+            if isinstance(value, str) or isinstance(value, unicode):
+                # Value specified as string - check the format using python
+                # builtin conversion
+                _v = int(value)
+            elif not isinstance(value, int):
+                # Value specified neither as int nor string - raise error
+                raise ValueError("%s is not an int" % value)
+            else:
+                _v = value
+        except ValueError:
+            logger.warning('@Validator - Value is not a proper int.',
+                           exc_info=True)
+            return False
+
+        # Check that atrribute value falls in allowed range
+        if _v < min or _v > max:
+            logger.warning(
+                "@Validator - Value not in allowed range: %s - %s" %
+                (key, _v)
+            )
+            return False
+
+        return True
+
+    def validate_float(self, key, value, min, max):
+        # Attribute of type float - check the format
+        try:
+            if isinstance(value, str) or isinstance(value, unicode):
+                # Value specified as string - check the format using python
+                # builtin conversion
+                _v = float(value)
+            elif not isinstance(value, float) and not isinstance(value, int):
+                # Value specified neither as float nor string - raise error
+                raise ValueError("%s is not a float" % value)
+            else:
+                _v = value
+        except ValueError:
+            logger.warning('@Validator - Value is not a proper float',
+                           exc_info=True)
+            return False
+
+        # Check that atrribute value falls in allowed range
+        if _v < min or _v > max:
+            logger.warning(
+                "@Validator - Value not in allowed range: %s - %s" %
+                (key, _v)
+            )
+            return False
 
         return True
 
