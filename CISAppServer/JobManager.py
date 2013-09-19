@@ -5,10 +5,7 @@ Main module of CISAppServer. Responsible for job management.
 """
 
 import os
-try:
-    import json
-except:
-    import simplejson as json
+import json
 import shutil
 import time
 import logging
@@ -50,6 +47,8 @@ class Job(object):
         self.data = {}
         #: Job parameters after validation
         self.valid_data = {}
+        #: List of job IDs whose output we would like to consume (job chaining)
+        self.chain = []
         self.__state = None
         self.__size = 0
 
@@ -290,7 +289,7 @@ class JobManager(object):
         Existing state is purged.
         """
         # Initialize Validator and PbsManager
-        self.validator = T.Validator()  #: Validator instance
+        self.validator = T.Validator(self)  #: Validator instance
         self.schedulers = {  #: Scheduler interface instances
             'pbs': T.PbsScheduler()
         }
@@ -329,6 +328,29 @@ class JobManager(object):
             # Reduce memory footprint
             if _job.get_state() in ('done', 'failed', 'killed', 'aborted'):
                 _job.compact()
+
+    def get_job_ids(self, state='all'):
+        """
+        Get IDs of existing jobs.
+
+        :param state: State of the jobs to return. Valid values:
+
+        * all
+        * waiting
+        * queued
+        * running
+        * done
+        * aborted
+        * killed
+        * delete
+        """
+
+        _id_list = []
+        for _id in self.__jobs.keys():
+            if state == 'all' or state == self.__jobs[_id].get_state():
+                _id_list.append(_id)
+
+        return _id_list
 
     def get_job(self, job_id, create=False):
         """
@@ -712,7 +734,8 @@ class JobManager(object):
         _scheduler = self.schedulers[job.valid_data['scheduler']]
         # Ask scheduler to generate scripts and submit the job
         if _scheduler.generate_scripts(job):
-            return _scheduler.submit(job)
+            if _scheduler.chain_input_data(job):
+                return _scheduler.submit(job)
 
         return False
 

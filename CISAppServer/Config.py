@@ -120,7 +120,7 @@ class Config(dict):
             'delete'
         )
         #: Reserved key names for job parameters
-        self.service_reserved_keys = ('service', 'name', 'scheduler', 'queue')
+        self.service_reserved_keys = ('CIS_SCHEDULER', 'CIS_QUEUE')
         #: Default job minimum lifetime in hours (supports fractions). Jobs
         #: that are younger then this cannot be removed by garbage collector
         self.service_min_lifetime = 2
