@@ -529,7 +529,7 @@ class JobManager(object):
                 # Stop if it is running
                 if _job.get_state() == 'running' or \
                         _job.get_state() == 'queued':
-                    self.schedulers[_job.valid_data['scheduler']].stop(
+                    self.schedulers[_job.valid_data['CIS_SCHEDULER']].stop(
                         _job, "User request"
                     )
                 # Remove job symlinks
@@ -731,7 +731,7 @@ class JobManager(object):
         """
         # During validation default values are set in Job.valid_data
         # Now we can access scheduler selected for current Job
-        _scheduler = self.schedulers[job.valid_data['scheduler']]
+        _scheduler = self.schedulers[job.valid_data['CIS_SCHEDULER']]
         # Ask scheduler to generate scripts and submit the job
         if _scheduler.generate_scripts(job):
             if _scheduler.chain_input_data(job):
@@ -745,7 +745,7 @@ class JobManager(object):
             if _state in ('done', 'failed', 'aborted', 'killed'):
                 continue
             if _state in ('queued', 'running'):
-                _scheduler = self.schedulers[_job.valid_data['scheduler']]
+                _scheduler = self.schedulers[_job.valid_data['CIS_SCHEDULER']]
                 _scheduler.stop(_job, 'Server shutdown')
             else:
                 _job.exit('Server shutdown', state='killed')

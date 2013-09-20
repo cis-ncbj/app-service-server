@@ -840,8 +840,8 @@ class PbsScheduler(Scheduler):
         _output_log = os.path.join(_work_dir, "output.log")
         # Select queue
         _queue = self.default_queue
-        if job.valid_data['queue'] != "":
-            _queue = job.valid_data['queue']
+        if job.valid_data['CIS_QUEUE'] != "":
+            _queue = job.valid_data['CIS_QUEUE']
 
         try:
             # Submit
@@ -1047,8 +1047,18 @@ class PbsScheduler(Scheduler):
             # Although there is no output code job might finished only epilogue
             # failed. Let the extraction finish.
 
+        # Cleanup of the output
         try:
             os.unlink(os.path.join(self.queue_path, job.id))
+            for _chain in job.chain:
+                shutil.rmtree(os.path.join(_work_dir, _chain),
+                                           ignore_errors=True)
+        except:
+            _job_state = 'abort'
+            logger.error("@PBS - Unable to clean up job output directory %s" %
+                         _work_dir, exc_info=True)
+
+        try:
             # Remove output dir if it exists.
             _out_dir = os.path.join(conf.gate_path_output, job.id)
             _dump_dir = os.path.join(conf.gate_path_dump, job.id)

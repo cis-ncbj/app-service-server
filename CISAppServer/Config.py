@@ -120,7 +120,7 @@ class Config(dict):
             'delete'
         )
         #: Allowed sections in job submission JSON
-        self.service_allowed_section = ('service', 'api', 'input', 'chain')
+        self.service_allowed_sections = ('service', 'api', 'input', 'chain')
         #: Reserved key names for job parameters
         self.service_reserved_keys = ('CIS_SCHEDULER', 'CIS_QUEUE')
         #: Default job minimum lifetime in hours (supports fractions). Jobs
