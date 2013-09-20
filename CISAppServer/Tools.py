@@ -134,6 +134,10 @@ class Validator(object):
         Upon initialisation load services configuration.
         """
 
+        #: Min API level
+        self.api_min = 1.0
+        #: Max API level
+        self.api_max = 1.0
         #: Services configurations
         self.services = {}
         #: JobManager instance
@@ -191,6 +195,24 @@ class Validator(object):
         elif not isinstance(_data['input'], dict):
             job.die("@Validator - 'input' section is not a dictionary",
                     err=False)
+            return False
+
+        # Make sure API level is correct
+        if 'api' not in _data.keys():
+            job.die("@Validator - Job did not specify API level.", err=False)
+            return False
+        if not self.validate_float('api', _data['api'],
+                                   self.api_min, self.api_max):
+            job.die("@Validator - API level %s is not supported." %
+                    _data['api'], err=False)
+            return False
+
+        # Make sure no unsupported sections were passed
+        for _k in _data.keys():
+            if _k not in conf.service_allowed_sections:
+                job.die("@Validator - Section '%s' is not allowed in job "
+                        "definition." % _k, err=False)
+                return False
 
         job.service = _data['service']
         _service = self.services[_data['service']]
@@ -219,6 +241,7 @@ class Validator(object):
                         "string. (%s: %s)" % (_k, _v),
                         err=False
                     )
+                    return False
                 if _v != 1:
                     job.die(
                         "@Validator - Set variables only accept value of 1. "
@@ -288,6 +311,7 @@ class Validator(object):
                not isinstance(_data['chain'], tuple):
                 job.die("@Validator - 'chain' section is not a list",
                         err=False)
+                return False
 
             if not self.validate_chain(_data['chain']):
                 job.die("@Validator - Bad job chain IDs.", err=False)
