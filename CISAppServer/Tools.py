@@ -764,6 +764,12 @@ class Scheduler(object):
                         err=True, exc_info=True
                     )
                     return False
+            else:
+                job.die(
+                    '@Scheduler - Job %s output directory does not exists.' %
+                    _id
+                )
+                return False
 
         return True
 
