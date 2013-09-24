@@ -5,10 +5,7 @@ managers, etc.
 """
 
 import os
-try:
-    import json
-except:
-    import simplejson as json
+import json
 import string
 import stat
 import re
@@ -132,13 +129,19 @@ class Validator(object):
     It is also responsible for preparation of PBS scripts.
     """
 
-    def __init__(self):
+    def __init__(self, jm):
         """
         Upon initialisation load services configuration.
         """
 
+        #: Min API level
+        self.api_min = 1.0
+        #: Max API level
+        self.api_max = 1.0
         #: Services configurations
         self.services = {}
+        #: JobManager instance
+        self.jm = jm
 
         # Load all files from service_conf_path. Configuration files should be
         # in JSON format.
@@ -186,12 +189,38 @@ class Validator(object):
                     _data['service'], err=False)
             return False
 
+        # Make sure that input dictionary exists
+        if 'input' not in _data.keys():
+            _data['input'] = {}
+        elif not isinstance(_data['input'], dict):
+            job.die("@Validator - 'input' section is not a dictionary",
+                    err=False)
+            return False
+
+        # Make sure API level is correct
+        if 'api' not in _data.keys():
+            job.die("@Validator - Job did not specify API level.", err=False)
+            return False
+        if not self.validate_float('api', _data['api'],
+                                   self.api_min, self.api_max):
+            job.die("@Validator - API level %s is not supported." %
+                    _data['api'], err=False)
+            return False
+
+        # Make sure no unsupported sections were passed
+        for _k in _data.keys():
+            if _k not in conf.service_allowed_sections:
+                job.die("@Validator - Section '%s' is not allowed in job "
+                        "definition." % _k, err=False)
+                return False
+
         job.service = _data['service']
+        _service = self.services[_data['service']]
 
         # Load defaults
         _variables = {
             _k: _v['default'] for _k, _v in
-            self.services[_data['service']].variables.items()
+            _service.variables.items()
         }
         _variables.update({
             _k: _v['default'] for _k, _v in
@@ -199,8 +228,8 @@ class Validator(object):
         })
 
         # Load sets
-        for _k, _v in _data.items():
-            if _k in self.services[_data['service']].sets.keys():
+        for _k, _v in _data['input'].items():
+            if _k in _service.sets.keys():
                 if isinstance(_v, str) or isinstance(_v, unicode):
                     # Value specified as string - check the format using python
                     # builtin conversion
@@ -212,6 +241,7 @@ class Validator(object):
                         "string. (%s: %s)" % (_k, _v),
                         err=False
                     )
+                    return False
                 if _v != 1:
                     job.die(
                         "@Validator - Set variables only accept value of 1. "
@@ -221,20 +251,17 @@ class Validator(object):
                     return False
                 _variables.update(
                     {_kk: _vv for _kk, _vv in
-                     self.services[
-                         _data['service']
-                     ].sets[_k].items()}
+                     _service.sets[_k].items()}
                 )
-                del _data[_k]
+                del _data['input'][_k]
 
         # Load variables
-        for _k, _v in _data.items():
-            if _k in conf.service_reserved_keys and _k != 'service':
+        for _k, _v in _data['input'].items():
+            if _k in conf.service_reserved_keys or _k.startswith('CIS_CHAIN'):
                 job.die("@Validator - '%s' variable name is restricted." % _k,
                         err=False)
                 return False
-            elif _k in self.services[_data['service']].variables.keys() or \
-                    _k == 'service':
+            elif _k in _service.variables.keys():
                 _variables[_k] = _v
             else:
                 job.die("@Validator - Not supported variable: %s." % _k,
@@ -244,9 +271,8 @@ class Validator(object):
         # Check that all attribute names are defined in service configuration
         # Validate values of the attributes
         for _k, _v in _variables.items():
-            if _k in self.services[_data['service']].variables.keys():
-                if not self.validate_value(_k, _v,
-                                           self.services[_data['service']]):
+            if _k in _service.variables.keys():
+                if not self.validate_value(_k, _v, _service):
                     job.die(
                         "@Validator - Variable value not allowed: %s - %s." %
                         (_k, _v), err=False
@@ -278,6 +304,30 @@ class Validator(object):
                         err=False)
                 return False
 
+        # Validate job output chaining. Check if defined job IDs point to
+        # existing jobs in 'done' state.
+        if 'chain' in _data.keys():
+            if not isinstance(_data['chain'], list) and \
+               not isinstance(_data['chain'], tuple):
+                job.die("@Validator - 'chain' section is not a list",
+                        err=False)
+                return False
+
+            if not self.validate_chain(_data['chain']):
+                job.die("@Validator - Bad job chain IDs.", err=False)
+                return False
+            else:
+                job.chain = _data['chain']
+                # Generate keywords for script substitutions
+                _i = 0
+                for _id in job.chain:
+                    _variables["CIS_CHAIN%s" % _i] = _id
+                    _i += 1
+                logger.debug(
+                    "@Validator - Job chain IDs passed validation: %s" %
+                    _data['chain']
+                )
+
         # Update job data with default values
         job.valid_data = _variables
         verbose('@Validator - Validated input data:')
@@ -303,9 +353,11 @@ class Validator(object):
                 return False
         elif service.variables[key]['type'] == 'int':
             try:
-                return self.validate_int(key, value,
+                return self.validate_int(
+                    key, value,
                     service.variables[key]['values'][0],
-                    service.variables[key]['values'][1])
+                    service.variables[key]['values'][1]
+                )
             except IndexError:
                 logger.error(
                     "@Validator - Badly defined range for variable:  %s" %
@@ -314,9 +366,11 @@ class Validator(object):
                 return False
         elif service.variables[key]['type'] == 'float':
             try:
-                return self.validate_float(key, value,
+                return self.validate_float(
+                    key, value,
                     service.variables[key]['values'][0],
-                    service.variables[key]['values'][1])
+                    service.variables[key]['values'][1]
+                )
             except IndexError:
                 logger.error(
                     "@Validator - Badly defined range for variable:  %s" %
@@ -375,7 +429,7 @@ class Validator(object):
                     key
                 )
                 return False
-            for _v in values:
+            for _v in value:
                 if not self.validate_int(key, _v, _min, _max):
                     return False
         elif service.variables[key]['type'] == 'float_array':
@@ -465,6 +519,17 @@ class Validator(object):
             )
             return False
 
+        return True
+
+    def validate_chain(self, chain):
+        for _id in chain:
+            # ID of type string check if it is listed among finished jobs
+            if not _id in self.jm.get_job_ids('done'):
+                logger.warning(
+                    "@Validator - Job %s did not finish or does not exist. "
+                    "Unable to chain output." %
+                    _id)
+                return False
         return True
 
 
@@ -698,6 +763,42 @@ class Scheduler(object):
 
         return True
 
+    def chain_input_data(self, job):
+        """
+        Chain output data of finished jobs as our input.
+
+        Copies output data of specified job IDs into the working directory of
+        current job.
+
+        :param job: :py:class:`Job` instance after validation
+        :return: True on success and False otherwise.
+        """
+        logger.debug('@Scheduler - Chaining input data')
+        _work_dir = os.path.join(self.work_path, job.id)
+        for _id in job.chain:
+            _input_dir = os.path.join(conf.gate_path_output, _id)
+            _output_dir = os.path.join(_work_dir, _id)
+            if os.path.exists(_input_dir):
+                try:
+                    shutil.copytree(_input_dir, _output_dir)
+                    logger.debug(
+                        "@Scheduler - Job %s output chained as input for "
+                        "Job %s" % (_id, job.id))
+                except:
+                    job.die(
+                        '@Scheduler - Cannot chain job %s output.' % _id,
+                        err=True, exc_info=True
+                    )
+                    return False
+            else:
+                job.die(
+                    '@Scheduler - Job %s output directory does not exists.' %
+                    _id
+                )
+                return False
+
+        return True
+
 
 class PbsScheduler(Scheduler):
     """
@@ -741,8 +842,8 @@ class PbsScheduler(Scheduler):
         _output_log = os.path.join(_work_dir, "output.log")
         # Select queue
         _queue = self.default_queue
-        if job.valid_data['queue'] != "":
-            _queue = job.valid_data['queue']
+        if job.valid_data['CIS_QUEUE'] != "":
+            _queue = job.valid_data['CIS_QUEUE']
 
         try:
             # Submit
@@ -795,7 +896,8 @@ class PbsScheduler(Scheduler):
             job.die('@PBS - Unable to read PBS job ID', exc_info=True)
             return _status
 
-        #TODO Consider switch to two calls for whole queue instead of one per job:
+        #TODO Consider switch to two calls for whole queue instead of one per
+        #job:
         # qstat -i -u apprunner - waiting
         # qstat -r -u apprunner - running
         try:
@@ -947,8 +1049,18 @@ class PbsScheduler(Scheduler):
             # Although there is no output code job might finished only epilogue
             # failed. Let the extraction finish.
 
+        # Cleanup of the output
         try:
             os.unlink(os.path.join(self.queue_path, job.id))
+            for _chain in job.chain:
+                shutil.rmtree(os.path.join(_work_dir, _chain),
+                                           ignore_errors=True)
+        except:
+            _job_state = 'abort'
+            logger.error("@PBS - Unable to clean up job output directory %s" %
+                         _work_dir, exc_info=True)
+
+        try:
             # Remove output dir if it exists.
             _out_dir = os.path.join(conf.gate_path_output, job.id)
             _dump_dir = os.path.join(conf.gate_path_dump, job.id)

@@ -1,5 +1,5 @@
 #!/bin/sh
-#PBS -q @@{queue}
+#PBS -q @@{CIS_QUEUE}
 #@@{PBS_OPTS}
 
 echo "Commencing test: @@{TestName}" | tee -a progress.log
