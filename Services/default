@@ -4,7 +4,7 @@
         "service" : {
             "type" : "string",
             "default" : "",
-            "values" : ["MultiNest", "Test", "EPRCore"]
+            "values" : ["MultiNest", "Test", "PWRCore"]
         },
         "scheduler" : {
             "type" : "string",

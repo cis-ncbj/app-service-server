@@ -553,20 +553,22 @@ class Scheduler(object):
                     '@Scheduler - Make output directory world readable')
                 os.chmod(_out_dir, os.stat(_out_dir).st_mode |
                          stat.S_IRUSR | stat.S_IXUSR |
+                         stat.S_IRGRP | stat.S_IXGRP |
                          stat.S_IROTH | stat.S_IXOTH)
                 for _root, _dirs, _files in os.walk(_out_dir):
                     for _dir in _dirs:
                         _name = os.path.join(_root, _dir)
                         os.chmod(_name, os.stat(_name).st_mode |
                                  stat.S_IRUSR | stat.S_IXUSR |
+                                 stat.S_IRGRP | stat.S_IXGRP |
                                  stat.S_IROTH | stat.S_IXOTH)
                     for _file in _files:
                         _name = os.path.join(_root, _file)
                         os.chmod(_name, os.stat(_name).st_mode |
-                                 stat.S_IRUSR | stat.S_IROTH)
+                                 stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
         except:
             job.die("@Scheduler - Unable to correct permissions for job "
-                    "output directory %s" % _work_dir, exc_info=True)
+                    "output directory %s" % _out_dir, exc_info=True)
 
     def generate_scripts(self, job):
         """
