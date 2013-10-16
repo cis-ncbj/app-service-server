@@ -501,6 +501,47 @@ class JobManager(object):
                         "for job %s" % _jid
                     )
 
+    def check_job_kill_requests(self):
+        """
+        Check for job kill requests.
+
+        If found and job is still running kill it.
+        """
+
+        # Symlinks in "stop" dir mark jobs for removal
+        try:
+            _queue = os.listdir(conf.gate_path_stop)
+        except:
+            logger.error("@JManager - Unable to read kill queue: %s." %
+                         conf.gate_path_stop, exc_info=True)
+            return
+
+        for _jid in _queue:
+            logger.debug('@JManager - Detected job marked for a kill: %s' %
+                         _jid)
+
+            _job = self.get_job(_jid, create=True)
+            if _job is None:
+                continue
+
+            # Stop if it is running
+            if _job.get_state() == 'running' or \
+                    _job.get_state() == 'queued':
+                self.schedulers[_job.valid_data['CIS_SCHEDULER']].stop(
+                    _job, "User request"
+                )
+            elif _job.get_state() == 'waiting':
+                _job.set_state('killed')
+            else:
+                logger.warning("@JManager - Cannot kill job %s. "
+                               "It is already finished." % _jid)
+
+            try:
+                os.unlink(os.path.join(conf.gate_path_stop, _jid))
+            except:
+                logger.error("Cannot remove kill mark for job %s." % _jid,
+                             exc_info=True)
+
     def check_deleted_jobs(self):
         """
         Check for jobs marked for removal.
@@ -596,7 +637,8 @@ class JobManager(object):
                     _path = os.path.join(conf.gate_path_output, _jid)
                 elif _state == 'running':
                     _path = os.path.join(conf.gate_path_running, _jid)
-                    _delete_dt = self.services[_job.service].config['max_runtime']
+                    _delete_dt = self.services[
+                        _job.service].config['max_runtime']
                     _dt = timedelta(hours=_delete_dt)
                 else:
                     continue
@@ -605,7 +647,8 @@ class JobManager(object):
                 T.verbose("@JManager - Removal dt: %s" % _dt)
                 T.verbose("@JManager - Path time: %s" % _path_time)
                 T.verbose("@JManager - Current time: %s" % _now)
-                T.verbose("@JManager - Time diff: %s" % (_path_time + _dt - _now))
+                T.verbose("@JManager - Time diff: %s" %
+                          (_path_time + _dt - _now))
                 _path_time += _dt
             except:
                 logger.error(
@@ -773,4 +816,3 @@ class JobManager(object):
             self.check_running_jobs()
             self.check_old_jobs()
             self.check_deleted_jobs()
-

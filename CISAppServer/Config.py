@@ -168,8 +168,10 @@ class Config(dict):
         self.gate_path_aborted = None
         #: Path were where killed jobs are symlinked
         self.gate_path_killed = None
-        #: Path were where jobs shceduled for removal are symlinked
+        #: Path were where jobs scheduled for removal are symlinked
         self.gate_path_delete = None
+        #: Path were where jobs scheduled to be killed are symlinked
+        self.gate_path_stop = None
         #: Dictionary of job states with corresponding paths
         self.gate_path = {
             "waiting": None,
@@ -242,6 +244,7 @@ class Config(dict):
         self.gate_path_aborted = os.path.join(self.gate_path_shared, 'aborted')
         self.gate_path_killed = os.path.join(self.gate_path_shared, 'killed')
         self.gate_path_delete = os.path.join(self.gate_path_shared, 'delete')
+        self.gate_path_stop = os.path.join(self.gate_path_shared, 'stop')
         self.gate_path = {
             "waiting": self.gate_path_waiting,
             "queued": self.gate_path_queued,
@@ -251,6 +254,7 @@ class Config(dict):
             "aborted": self.gate_path_aborted,
             "killed": self.gate_path_killed,
             "delete": self.gate_path_delete,
+            "stop": self.gate_path_stop,
         }
 
         # Create those paths if they do not exist
@@ -264,6 +268,7 @@ class Config(dict):
             "gate_path_jobs",
             "gate_path_exit",
             "gate_path_delete",
+            "gate_path_stop",
             "gate_path_waiting",
             "gate_path_queued",
             "gate_path_running",
