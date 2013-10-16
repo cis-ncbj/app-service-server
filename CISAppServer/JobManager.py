@@ -814,5 +814,6 @@ class JobManager(object):
             if self.__queue_running:
                 self.check_new_jobs()
             self.check_running_jobs()
+            self.check_job_kill_requests()
             self.check_old_jobs()
             self.check_deleted_jobs()
