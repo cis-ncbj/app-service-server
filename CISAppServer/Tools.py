@@ -6,6 +6,7 @@ managers, etc.
 
 import os
 import json
+import csv
 import string
 import stat
 import re
@@ -142,6 +143,8 @@ class Validator(object):
         self.services = {}
         #: JobManager instance
         self.jm = jm
+        #: Current job instance
+        self.job = None
 
         # Load all files from service_conf_path. Configuration files should be
         # in JSON format.
@@ -168,6 +171,9 @@ class Validator(object):
         :param job: :py:class:`Job` instance
         :rerurn: True on success False otherwise.
         """
+
+        #TODO should be cleaned - whole return thing makes it hard ...
+        self.job = job
 
         # Do not validate jobs for the second time. This will conserve
         # resources in case shceduler queue is full and we try to resubmit
@@ -466,6 +472,33 @@ class Validator(object):
                     return False
 
         return True
+
+    def validate_file(self, key, file_type, data_type, min, max):
+        #TODO How should I access job.id ??
+        _input_dir = os.path.join(conf.gate_path_input, self.job.id)
+        _input_file = os.path.join(_input_dir, key)
+        if file_type == 'csv':
+            try:
+                return self.validate_file_csv(_input_file, data_type, min, max)
+            except:
+                logger.warning('@Validator - CSV validation failed.',
+                               exc_info=True)
+                return False
+        else:
+            logger.warning('@Validator - Unknown file type %s.' % file_type,
+                           exc_info=True)
+            return False
+
+    def validate_file_csv(self, name, type, min, max):
+        _f = open(name)
+        _csv = csv.reader(_f)
+        for _v in _csv:
+            if type == 'int':
+                if not self.validate_int("CSV element", _v, min, max):
+                    return False
+            if type == 'float':
+                if not self.validate_float("CSV element", _v, min, max):
+                    return False
 
     def validate_int(self, key, value, min, max):
         # Attribute of type int - check the format
