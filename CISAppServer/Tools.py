@@ -4,6 +4,10 @@ Utility classes used by CISAppServer: validation, communication with queue
 managers, etc.
 """
 
+# Plugins
+# http://yapsy.sourceforge.net/
+# http://stackoverflow.com/questions/5333128/yapsy-minimal-example
+
 import os
 import json
 import string
