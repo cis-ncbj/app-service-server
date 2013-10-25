@@ -123,6 +123,8 @@ class Config(dict):
         self.service_allowed_sections = ('service', 'api', 'input', 'chain')
         #: Reserved key names for job parameters
         self.service_reserved_keys = ('CIS_SCHEDULER', 'CIS_QUEUE')
+        #: Default user name for job execution
+        self.service_username = 'apprunner'
         #: Default job minimum lifetime in hours (supports fractions). Jobs
         #: that are younger then this cannot be removed by garbage collector
         self.service_min_lifetime = 2

@@ -6,6 +6,7 @@ managers, etc.
 
 import os
 import json
+import xml.etree.cElementTree as ET
 import string
 import stat
 import re
@@ -67,7 +68,8 @@ class Service(dict):
             'max_runtime': conf.service_max_runtime,
             'max_jobs': conf.service_max_jobs,
             'quota': conf.service_quota,
-            'job_size': conf.service_job_size
+            'job_size': conf.service_job_size,
+            'username' : conf.service_username
         }
         # Load settings from config file
         self.config.update(data['config'])
@@ -546,7 +548,7 @@ class Scheduler(object):
     # burden lets do it every n-th step
     __progress_step = 0
 
-    def __init__(self):
+    def __init__(self, jm):
         #: Working directory path
         self.work_path = None
         #: Path where submitted job IDs are stored
@@ -555,6 +557,8 @@ class Scheduler(object):
         self.default_queue = None
         #: Maximum number of concurent jobs
         self.max_jobs = None
+        #: JobManager instance
+        self.jm = jm
 
     def submit(self, job):
         """
@@ -807,13 +811,16 @@ class PbsScheduler(Scheduler):
     Allows for job submission, deletion and extraction of job status.
     """
 
-    def __init__(self):
+    def __init__(self, jm):
+        super(PbsScheduler, self).__init__(jm)
         #: PBS Working directory path
         self.work_path = conf.pbs_path_work
         #: Path where submitted PBS job IDs are stored
         self.queue_path = conf.pbs_path_queue
         #: Default PBS queue
         self.default_queue = conf.pbs_default_queue
+        #: Username
+        self.user = conf.pbs_user
         #: Maximum number of concurent jobs
         self.max_jobs = conf.pbs_max_jobs
 
@@ -938,7 +945,7 @@ class PbsScheduler(Scheduler):
                         if _res == 'C':
                             _done = 1
                             break
-                        # Consider running, exiting and complete as running
+                        # Consider running, exiting as running
                         elif _res == 'R' or _res == 'E':
                             _status = 'running'
                             job.set_state('running')
@@ -963,6 +970,78 @@ class PbsScheduler(Scheduler):
                 _status = 'killed'
 
         return _status
+
+    def new_status(self, jobs):
+        _users = ()
+        for _service in self.jm.services.values():
+            if _service.config['username'] not in _users:
+                _users.append(_service.config['username'])
+
+        _job_states = {}
+        for _usr in _users:
+            try:
+                # Run qstat
+                logger.debug("@PBS - Check jobs state for user %s" % _usr)
+                _opts = ["/usr/bin/qstat", "-f", "-x", "-u", _usr]
+                _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
+                _output = _proc.communicate()[0]
+                # Check return code. If qstat was not killed by signal Popen will
+                # not rise an exception
+                elif _proc.returncode != 0:
+                    raise OSError((
+                        _proc.returncode,
+                        "/usr/bin/qstat returned non zero exit code.\n%s" %
+                        str(_output)
+                    ))
+            except:
+                logger.error("@PBS - Unable to check jobs state.",
+                             exc_info=True)
+                return
+
+            try:
+                _xroot = ET.fromstring(_output)
+                for _xjob in _xroot.iter('Job'):
+                    _xjid = _xjob.find('Job_Id').text
+                    _xstate = _xjob.get('job_state')
+                    _xexit = _xjob.get('exit_status')
+                    if _xexit is not None:
+                        _xexit = _xexit.text
+                    _job_states[_xjid] = (_xstate, _xexit)
+            except:
+                logger.error("@PBS - Unable to parse qstat output.",
+                             exc_info=True)
+                return
+
+        for _job in jobs:
+            _pbs_id = ''
+            _work_dir = os.path.join(self.work_path, _job.id)
+            try:
+                with open(os.path.join(self.queue_path, _job.id)) as _pbs_file:
+                    _pbs_id = _pbs_file.readline().strip()
+            except:
+                _job.die('@PBS - Unable to read PBS job ID', exc_info=True)
+
+            if _pbs_id not in _job_states.keys()
+                _job.die('@PBS - Job does not exist in the PBS')
+            else:
+                _new_state = 'queued'
+                _exit_code = 0
+                _state = _job_states[_pbs_id]
+                if _state[0] == 'C':
+                    _new_state = 'done'
+                    _exit_code = _state[1]
+                    if _exit_code is None or int(_exit_code) > 256:
+                        _new_state = 'killed'
+                    self.finalise(_job)
+                if _state[0] == 'R' or _state[0] == 'E':
+                    _new_state = 'running'
+
+                if _new_state != _job.get_state():
+                    try:
+                        _job.set_state(_new_state)
+                    except:
+                        job.die("@PBS - Unable to set state of job %s" %
+                                _job.id, exc_info=True)
 
     def stop(self, job, msg):
         """
