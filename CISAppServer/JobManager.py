@@ -15,7 +15,7 @@ from subprocess import Popen, PIPE, STDOUT
 import Tools as T
 from Config import conf
 
-version = "0.2"
+version = "0.3"
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,9 @@ class Job(object):
         #: List of job IDs whose output we would like to consume (job chaining)
         self.chain = []
         self.__state = None
+        self.__exit_message = ""
+        self.__exit_state = None
+        self.__exit_code = -100
         self.__size = 0
 
         # Load job file from jobs directory
@@ -138,6 +141,30 @@ class Job(object):
 
         self.__state = new_state
 
+    def finish(self, message, state='done', exit_code=0):
+        # Valid output states
+        _states = ( 'done', 'failed', 'aborted', 'killed' )
+
+        # Only three output states are allowed
+        if state not in _states:
+            _msg = "@Job - Wrong job exit status provided: %s." % state
+            message = _msg + 'Original message:\n' + message
+            state = 'aborted'
+
+        _prefix = state[:1].upper() + state[1:]
+        # Prepend the state prefix to status message
+        _message = "%s (%s): %s\n" % \
+                (_prefix, exit_code, message)
+
+        # Prepend the state prefix to status message
+        self.__exit_message += _message
+        self.__exit_state = state
+        self.__exit_code = exit_code
+
+        # TODO store exit_message exit_state and exit_code (JSON??)
+
+        self.set_state("closing")
+
     def die(self, message, err=True, exc_info=False):
         """
         Abort further job execution with proper error in AppServer log as well
@@ -151,13 +178,13 @@ class Job(object):
             logger).
         """
 
-        self.exit(message, 'aborted')
+        self.finish(message, 'aborted', -99)
         if err:
             logger.error(message, exc_info=exc_info)
         else:
             logger.warning(message, exc_info=exc_info)
 
-    def exit(self, message, state='done'):
+    def exit(self):
         """
         Set one of job finished states and generate job output status file.
 
@@ -169,35 +196,22 @@ class Job(object):
             'killed'
         """
 
-        # Prefixes for output status messages
-        _states = {
-            'done': 'Done: ',
-            'failed': 'Failed: ',
-            'aborted': 'Aborted: ',
-            'killed': 'Killed: '
-        }
+        if self.__exit_state is None:
+            self.die("@Job - Exit status is not defined for job %s." %
+                         self.id)
+            return
 
-        # Only three output states are allowed
-        if state not in _states.keys():
-            _msg = "@Job - Wrong job exit status provided: %s." % state
-            message = _msg + 'Original message:\n' + message
-            state = 'aborted'
-
-        # Prepend the state prefix to status message
-        message = _states[state] + message + '\n'
         _name = os.path.join(conf.gate_path_exit, self.id)
         # Generate the output status file
         try:
-            self.set_state(state)
-            # Use append in case we got called several times due to consecutive
-            # errors
-            with open(_name, 'a') as _f:
-                _f.write(message)
+            self.set_state(self.__exit_state)
+            with open(_name) as _f:
+                _f.write(_message)
         except:
             logger.error("@Job - Cannot write to status file %s." % _name,
                          exc_info=True)
 
-        logger.info("Job %s finished: %s" % (self.id, state))
+        logger.info("Job %s finished: %s" % (self.id, self.__exit_state))
 
     def calculate_size(self):
         """
@@ -633,7 +647,13 @@ class JobManager(object):
             try:
                 if _state in ['aborted']:
                     _path = os.path.join(conf.gate_path_jobs, _jid)
-                elif _state in ['done', 'failed', 'killed']:
+                elif _state == 'killed':
+                    _path = os.path.join(conf.gate_path_output, _jid)
+                    # If job was killed in Waiting or Queued states it could
+                    # have not produced output
+                    if not os.path.isdir(_path):
+                        _path = os.path.join(conf.gate_path_jobs, _jid)
+                elif _state in ['done', 'failed']:
                     _path = os.path.join(conf.gate_path_output, _jid)
                 elif _state == 'running':
                     _path = os.path.join(conf.gate_path_running, _jid)
