@@ -19,6 +19,19 @@ VERBOSE = 5
 logger = logging.getLogger(__name__)
 
 
+class ExitCodes:
+    """
+    Job exit codes enum:
+
+    * -100: Undefined (this should not happen)
+    *  -99: Abort (default)
+    *  -98: Shutdown
+    *  -97: Delete
+    *  -96: UserKill
+    """
+    Undefined, Abort, Shutdown, Delete, UserKill = range(-100, -95)
+
+
 class Config(dict):
     """
     Class responsible for configuration storage and initialization.
@@ -115,9 +128,8 @@ class Config(dict):
         #: Valid job states as well as names of directories on shared storage
         #: that are used to monitor job states
         self.service_states = (
-            'waiting', 'queued', 'running',
+            'waiting', 'queued', 'running', 'closing', 'cleanup',
             'done', 'failed', 'aborted', 'killed',
-            'delete'
         )
         #: Allowed sections in job submission JSON
         self.service_allowed_sections = ('service', 'api', 'input', 'chain')
@@ -152,16 +164,20 @@ class Config(dict):
         #: Path where jobs output is moved before removal (aleviates problems
         #: with files that are still in use)
         self.gate_path_dump = 'Dump'
-        #: Path were jobs description is stored
+        #: Path where jobs description is stored
         self.gate_path_jobs = None
-        #: Path were jobs exit status is stored
+        #: Path where jobs exit status is stored
         self.gate_path_exit = None
-        #: Path were where waiting jobs are symlinked
+        #: Path where waiting jobs are symlinked
         self.gate_path_waiting = None
-        #: Path were where queued jobs are symlinked
+        #: Path where queued jobs are symlinked
         self.gate_path_queued = None
-        #: Path were where running jobs are symlinked
+        #: Path where running jobs are symlinked
         self.gate_path_running = None
+        #: Path where jobs waiting for cleanup are symlinked
+        self.gate_path_closing = None
+        #: Path where jobs during cleanup are symlinked
+        self.gate_path_cleanup = None
         #: Path were where done jobs are symlinked
         self.gate_path_done = None
         #: Path were where failed jobs are symlinked
@@ -179,11 +195,14 @@ class Config(dict):
             "waiting": None,
             "queued": None,
             "running": None,
+            "closing": None,
+            "cleanup": None,
             "done": None,
             "failed": None,
             "aborted": None,
             "killed": None,
             "delete": None,
+            "stop": None,
         }
 
     def load(self, conf_name=None):
@@ -241,6 +260,8 @@ class Config(dict):
         self.gate_path_waiting = os.path.join(self.gate_path_shared, 'waiting')
         self.gate_path_queued = os.path.join(self.gate_path_shared, 'queued')
         self.gate_path_running = os.path.join(self.gate_path_shared, 'running')
+        self.gate_path_closing = os.path.join(self.gate_path_shared, 'closing')
+        self.gate_path_cleanup = os.path.join(self.gate_path_shared, 'cleanup')
         self.gate_path_done = os.path.join(self.gate_path_shared, 'done')
         self.gate_path_failed = os.path.join(self.gate_path_shared, 'failed')
         self.gate_path_aborted = os.path.join(self.gate_path_shared, 'aborted')
@@ -251,6 +272,8 @@ class Config(dict):
             "waiting": self.gate_path_waiting,
             "queued": self.gate_path_queued,
             "running": self.gate_path_running,
+            "closing": self.gate_path_closing,
+            "cleanup": self.gate_path_cleanup,
             "done": self.gate_path_done,
             "failed": self.gate_path_failed,
             "aborted": self.gate_path_aborted,
@@ -274,6 +297,8 @@ class Config(dict):
             "gate_path_waiting",
             "gate_path_queued",
             "gate_path_running",
+            "gate_path_cleanup",
+            "gate_path_closing",
             "gate_path_done",
             "gate_path_failed",
             "gate_path_aborted",
@@ -328,10 +353,11 @@ class Config(dict):
     def mkdir_p(self, path):
         try:
             os.makedirs(path)
-        except OSError as exc: # Python >2.5
+        except OSError as exc:  # Python >2.5
             if exc.errno == errno.EEXIST and os.path.isdir(path):
                 pass
-            else: raise
+            else:
+                raise
 
 
 #: Global Config class instance. Use it to access the CISAppGateway

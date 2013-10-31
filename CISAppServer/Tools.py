@@ -73,7 +73,7 @@ class Service(dict):
             'max_jobs': conf.service_max_jobs,
             'quota': conf.service_quota,
             'job_size': conf.service_job_size,
-            'username' : conf.service_username
+            'username': conf.service_username
         }
         # Load settings from config file
         self.config.update(data['config'])
@@ -574,13 +574,9 @@ class Scheduler(object):
         """
         raise NotImplementedError
 
-    def status(self, job):
+    def progress(self, job):
         """
-        Return status of the job in execution queue.
-
         :param job: :py:class:`Job` instance
-
-        Returns one of "waiting", "running", "done", "unknown".
         """
         # Output job progress log if it exists
         # The progres log is extraced every n-th status check
@@ -859,9 +855,12 @@ class PbsScheduler(Scheduler):
         try:
             # Submit
             logger.debug("@PBS - Submitting new job")
-            _opts = ['/usr/bin/qsub', '-q', _queue,
-                     '-d', _work_dir, '-j', 'oe', '-o',  _output_log,
-                     '-l', 'epilogue=epilogue.sh', _run_script]
+            # Run qsub with proper user permissions
+            _user = job.service.config['username']
+            _comm = "/usr/bin/qsub -q %s -d %s -j oe -o %s " \
+                    "-l epilogue=epilogue.sh %s" % \
+                    (_queue, _work_dir, _output_log, _run_script)
+            _opts = ["/bin/su", "-c", _comm, _user]
             logger.debug("@PBS - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()
@@ -885,102 +884,20 @@ class PbsScheduler(Scheduler):
         logger.info("Job successfully submitted: %s" % job.id)
         return True
 
-    def status(self, job):
+    def update(self, jobs):
         """
-        Return status of the job in PBS queue.
+        Update job states to match their current state in PBS queue.
 
-        :param job: :py:class:`Job` instance
-
-        Returns one of "waiting", "running", "done", "unknown".
+        :param jobs: A list of Job instances for jobs to be updated.
         """
-
-        super(PbsScheduler, self).status(job)
-
-        _done = 0
-        _status = 'unknown'
-        _pbs_id = ''
-        _work_dir = os.path.join(self.work_path, job.id)
-        try:
-            with open(os.path.join(self.queue_path, job.id)) as _pbs_file:
-                _pbs_id = _pbs_file.readline().strip()
-        except:
-            job.die('@PBS - Unable to read PBS job ID', exc_info=True)
-            return _status
-
-        #TODO Consider switch to two calls for whole queue instead of one per
-        #job:
-        # qstat -i -u apprunner - waiting
-        # qstat -r -u apprunner - running
-        try:
-            # Run qstat
-            logger.debug("@PBS - Check job state")
-            _opts = ["/usr/bin/qstat", "-f", _pbs_id]
-            _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-            _output = _proc.communicate()[0]
-            if _proc.returncode == 153:
-                logger.debug(
-                    '@PBS - Job ID missing from PBS queue: done or error')
-                _done = 1
-            # Check return code. If qstat was not killed by signal Popen will
-            # not rise an exception
-            elif _proc.returncode != 0:
-                raise OSError((
-                    _proc.returncode,
-                    "/usr/bin/qstat returned non zero exit code.\n%s" %
-                    str(_output)
-                ))
-        except:
-            logger.error("@PBS - Unable to check job %s state." %
-                         job.id, exc_info=True)
-            return _status
-
-        if _done == 0:
-            verbose('@PBS - Qstat returned meaningful output. Start parsing.')
-            verbose(str(_output))
-            _re = re.compile('^job_state = (.*)')
-            for _line in _output.split('\n'):
-                _m = _re.match(_line.strip())
-                if _m is not None:
-                    _res = _m.group(1)
-                    logger.debug("@PBS - Found job_state: %s" % _res)
-                    try:
-                        # Jobs with status complete are done and should have
-                        # finished generating all output
-                        if _res == 'C':
-                            _done = 1
-                            break
-                        # Consider running, exiting as running
-                        elif _res == 'R' or _res == 'E':
-                            _status = 'running'
-                            job.set_state('running')
-                            break
-                        # Other states are considered as queued
-                        else:
-                            _status = 'queued'
-                            job.set_state('queued')
-                            break
-                    except:
-                        job.die("@PBS - Unable to set state of job %s" %
-                                job.id, exc_info=True)
-                        return 'unknown'
-
-        # When job is finished either epilogue was executed and status.dat is
-        # present. Otherwise assume it was killed
-        if _done == 1:
-            if os.path.isfile(os.path.join(_work_dir, 'status.dat')):
-                logger.debug("@PBS - Found job state: D")
-                _status = 'done'
-            else:
-                _status = 'killed'
-
-        return _status
-
-    def new_status(self, jobs):
+        # Extract list of user names associated to the jobs
         _users = ()
         for _service in self.jm.services.values():
             if _service.config['username'] not in _users:
                 _users.append(_service.config['username'])
 
+        # We agregate the jobs by user. This way one qstat call per user is
+        # required instead of on call per job
         _job_states = {}
         for _usr in _users:
             try:
@@ -989,9 +906,9 @@ class PbsScheduler(Scheduler):
                 _opts = ["/usr/bin/qstat", "-f", "-x", "-u", _usr]
                 _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
                 _output = _proc.communicate()[0]
-                # Check return code. If qstat was not killed by signal Popen will
-                # not rise an exception
-                elif _proc.returncode != 0:
+                # Check return code. If qstat was not killed by signal Popen
+                # will not rise an exception
+                if _proc.returncode != 0:
                     raise OSError((
                         _proc.returncode,
                         "/usr/bin/qstat returned non zero exit code.\n%s" %
@@ -1002,6 +919,7 @@ class PbsScheduler(Scheduler):
                              exc_info=True)
                 return
 
+            # Parse the XML output of qstat
             try:
                 _xroot = ET.fromstring(_output)
                 for _xjob in _xroot.iter('Job'):
@@ -1016,48 +934,66 @@ class PbsScheduler(Scheduler):
                              exc_info=True)
                 return
 
+        # Iterate through jobs
         for _job in jobs:
+            # Extract PBS id for the job
             _pbs_id = ''
-            _work_dir = os.path.join(self.work_path, _job.id)
             try:
                 with open(os.path.join(self.queue_path, _job.id)) as _pbs_file:
                     _pbs_id = _pbs_file.readline().strip()
             except:
                 _job.die('@PBS - Unable to read PBS job ID', exc_info=True)
 
-            if _pbs_id not in _job_states.keys()
+            # Check if the job exists in the PBS
+            if _pbs_id not in _job_states.keys():
                 _job.die('@PBS - Job does not exist in the PBS')
             else:
+                # Update job progress output
+                self.progress(_job)
                 _new_state = 'queued'
                 _exit_code = 0
                 _state = _job_states[_pbs_id]
+                # Job has finished. Check the exit code.
                 if _state[0] == 'C':
                     _new_state = 'done'
+                    _msg = 'Job finished succesfully'
                     _exit_code = _state[1]
                     if _exit_code is None or int(_exit_code) > 256:
                         _new_state = 'killed'
-                    self.finalise(_job)
-                if _state[0] == 'R' or _state[0] == 'E':
-                    _new_state = 'running'
-
-                if _new_state != _job.get_state():
+                        _msg = 'Job was killed by the scheduler'
+                    elif int(_exit_code) > 0:
+                        _new_state = 'failed'
+                        _msg = 'Job finished with error code'
                     try:
-                        _job.set_state(_new_state)
+                        _job.finish(_msg, _new_state, _exit_code)
                     except:
-                        job.die("@PBS - Unable to set state of job %s" %
-                                _job.id, exc_info=True)
+                        _job.die('@PBS - Unable to set job state (%s : %s)' %
+                                 (_new_state, _job.id), exc_info=True)
+                # Job is running
+                if _state[0] == 'R' or _state[0] == 'E':
+                    if _job.get_state() != 'running':
+                        try:
+                            _job.run()
+                        except:
+                            _job.die("@PBS - Unable to set job state "
+                                     "(running : %s)" % _job.id, exc_info=True)
+                # Treat all other states as queued
+                else:
+                    if _job.get_state() != 'queued':
+                        try:
+                            _job.queue()
+                        except:
+                            _job.die("@PBS - Unable to set job state "
+                                     "(queued : %s)" % _job.id, exc_info=True)
 
-    def stop(self, job, msg):
+    def stop(self, job, msg, exit_code):
         """
         Stop running job and remove it from PBS queue.
 
         :param job: :py:class:`Job` instance
         :param msg: Message that will be passed to the user
-        :return: True on success and False otherwise.
         """
-        _status = True  # Return value
         _pbs_id = ''
-        _work_dir = os.path.join(self.work_path, job.id)
 
         # Get Job PBS ID
         try:
@@ -1065,12 +1001,14 @@ class PbsScheduler(Scheduler):
                 _pbs_id = _pbs_file.readline().strip()
         except:
             job.die('@PBS - Unable to read PBS job ID', exc_info=True)
-            _status = False
+            return
 
         # Run qdel
         try:
             logger.debug("@PBS - Killing job")
-            _opts = ["/usr/bin/qdel", _pbs_id]
+            # Run qdel with proper user permissions
+            _user = job.service.config['username']
+            _opts = ["/bin/su", "-c", "/usr/bin/qdel %s" % _pbs_id, _user]
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()[0]
             # Check return code. If qstat was not killed by signal Popen will
@@ -1084,25 +1022,10 @@ class PbsScheduler(Scheduler):
         except:
             job.die("@PBS - Unable to terminate job %s." %
                     job.id, exc_info=True)
-            _status = False
+            return
 
-        # Remove PBS ID file
-        try:
-            os.unlink(os.path.join(self.queue_path, job.id))
-        except:
-            job.die("@PBS - Unable to remove job id file %s" %
-                    job.id, exc_info=True)
-            _status = False
-
-        # Remove the working directory and its contents
-        if os.path.isdir(_work_dir):
-            shutil.rmtree(_work_dir, onerror=rmtree_error)
-
-        # Set job state as killed
-        if _status:
-            job.exit(msg, state='killed')
-
-        return _status
+        # Mark as killed by user
+        job.mark(msg, exit_code)
 
     def finalise(self, job):
         """
@@ -1111,35 +1034,25 @@ class PbsScheduler(Scheduler):
         Job working directory is moved to the external_data_path directory.
 
         :param job: :py:class:`Job` instance
-        :return: True on success and False otherwise.
         """
+
+        # Mark job as in cleanup state
+        try:
+            job.cleanup()
+        except:
+            job.die("@PBS - Unable to set state for job %s." % job.id)
+            return
 
         logger.debug("@PBS - Retrive job output: %s" % job.id)
         _work_dir = os.path.join(self.work_path, job.id)
-        _job_state = 'abort'  # Job state
-        _status = 0  # Job exit status
-
-        # Get job output code
-        try:
-            with open(os.path.join(_work_dir, 'status.dat')) as _status_file:
-                _status = int(_status_file.readline().strip())
-                _job_state = 'done'
-        except:
-            _job_state = 'killed'
-            logger.warning("@PBS - Unable to extract job exit code: %s. "
-                           "Will continue with output extraction" % job.id,
-                           exc_info=True)
-            # Although there is no output code job might finished only epilogue
-            # failed. Let the extraction finish.
 
         # Cleanup of the output
         try:
             os.unlink(os.path.join(self.queue_path, job.id))
             for _chain in job.chain:
                 shutil.rmtree(os.path.join(_work_dir, _chain),
-                                           ignore_errors=True)
+                              ignore_errors=True)
         except:
-            _job_state = 'abort'
             logger.error("@PBS - Unable to clean up job output directory %s" %
                          _work_dir, exc_info=True)
 
@@ -1158,19 +1071,50 @@ class PbsScheduler(Scheduler):
             super(PbsScheduler, self).finalise(job)
             logger.info("Job %s output retrived." % job.id)
         except:
-            _job_state = 'abort'
-            logger.error("@PBS - Unable to retrive job output directory %s" %
-                         _work_dir, exc_info=True)
+            job.die("@PBS - Unable to retrive job output directory %s" %
+                    _work_dir, exc_info=True)
+            return
 
-        if _job_state == 'killed':
-            job.exit("", state='killed')
-        elif _job_state == 'done':
-            if _status == 0:
-                job.exit("%d" % _status)
-            else:
-                job.exit("%d" % _status, state='failed')
+        # Set job exit state
+        job.exit()
+
+    def abort(self, job):
+        """
+        Cleanup aborted job.
+
+        Removes working and output directories.
+
+        :param job: :py:class:`Job` instance
+        """
+
+        # Mark job as in cleanup state
+        try:
+            job.cleanup()
+        except:
+            job.die("@PBS - Unable to set state for job %s." % job.id)
+            return
+
+        logger.debug("@PBS - Cleanup job: %s" % job.id)
+        _work_dir = os.path.join(self.work_path, job.id)
+        _out_dir = os.path.join(conf.gate_path_output, job.id)
+
+        # Remove output dir if it exists.
+        if os.path.isdir(_out_dir):
+            logger.debug('@PBS - Remove existing output directory')
+            shutil.rmtree(_out_dir, ignore_errors=True)
+        # Remove work dir if it exists.
+        if os.path.isdir(_work_dir):
+            logger.debug('@PBS - Remove working directory')
+            shutil.rmtree(_work_dir, ignore_errors=True)
+
+        if os.path.isdir(_out_dir):
+            logger.error("@PBS - Unable to remove job output directory: %s" %
+                         job.id, exc_info=True)
+        if os.path.isdir(_out_dir):
+            logger.error("@PBS - Unable to remove job working directory: %s" %
+                         job.id, exc_info=True)
         else:
-            job.die("@PBS - Unable to finalise job %s." % job.id)
-            return False
+            logger.info("Job %s cleaned." % job.id)
 
-        return True
+        # Set job exit state
+        job.exit()
