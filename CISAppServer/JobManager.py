@@ -68,12 +68,29 @@ class Job(object):
                      exc_info=True)
             return None
 
+        # Load job state
         try:
             self.__check_state()
         except:
             self.die(u"@Job - Unable to check state (%s)." % self.id,
                      exc_info=True)
             return None
+
+        # Load job internal data
+        _name = os.path.join(conf.gate_path_jobs, self.id + '.opt')
+        if os.path.isfile(_name):
+            try:
+                with open(_name) as _f:
+                    _data = json.load(_f)
+                    if "exit_state" in _data.keys():
+                        self.__exit_state = _data["exit_state"]
+                    if "exit_code" in _data.keys():
+                        self.__exit_code = _data["exit_code"]
+                    if "exit_message" in _data.keys():
+                        self.__exit_message = _data["exit_message"]
+            except:
+                logger.error("@Job - Unable to load job info from: %s." %
+                             _name)
 
     def get_size(self):
         """
@@ -114,6 +131,27 @@ class Job(object):
 
         return self.__state
 
+    def get_exit_state(self):
+        """
+        Get job "exit state" - the state that job will be put into after it is
+        finalised. The "exit state" is set using :py:meth:`finish`.
+
+        :return: One of valid job exit states or None if the "exit state" is
+        not yet defined:
+
+        * done:
+            job has finished,
+        * failed:
+            job has finished with non zero exit code,
+        * aborted:
+            an error occurred during job preprocessing, submission or
+            postprocessing,
+        * killed:
+            job was killed,
+        """
+
+        return self.__exit_state
+
     def queue(self):
         """ Mark job as queued. """
         self.__set_state('queued')
@@ -145,54 +183,22 @@ class Job(object):
         if self.get_state() not in ['waiting', 'queued', 'running']:
             logger.warning("@Job - Job %s already finished, cannot mark as "
                            "killed" % self.id)
+            return
 
-        _state = "killed"
-        _prefix = _state[:1].upper() + _state[1:]
-        # Prepend the state prefix to status message
-        _message = "%s:%s %s\n" % \
-            (_prefix, exit_code, message)
-
-        # Prepend the state prefix to status message
-        self.__exit_message += _message
-        self.__exit_state = _state
-        self.__exit_code = exit_code
-        # TODO store exit_message exit_state and exit_code (JSON??)
+        self.__set_exit_state(message, 'killed', exit_code)
 
     def finish(self, message, state='done', exit_code=0):
         """
         Mark job as finished. Job will be set into *closing* state. When
-        cleanup is finished the Job.exit() method should be called to set the
-        job into its exit_state.
+        cleanup is finished the :py:meth:`exit` method should be called to set
+        the job into its "exit state".
 
         :param message: that will be passed to user,
         :param state: Job state after cleanup will finish. One of:
             ['done', 'failed', 'aborted', 'killed'],
         :param exit_code: that will be set for this job.
         """
-        # Valid output states
-        _states = ('done', 'failed', 'aborted', 'killed')
-
-        if state not in _states:
-            _msg = "@Job - Wrong job exit status provided: %s." % state
-            message = _msg + 'Original message:\n' + message
-            state = 'aborted'
-            exit_code = ExitCodes.Abort
-
-        # Prepend the state prefix to status message
-        _prefix = state[:1].upper() + state[1:]
-        _message = "%s:%s %s\n" % \
-            (_prefix, exit_code, message)
-
-        # Concatanate all status messages
-        self.__exit_message += _message
-        # Do not overwrite aborted or killed states
-        if self.__exit_state != 'aborted':
-            if self.__exit_state != 'killed' or state == 'aborted':
-                self.__exit_state = state
-                self.__exit_code = exit_code
-
-        # TODO store exit_message exit_state and exit_code (JSON??)
-
+        self.__set_exit_state(message, state, exit_code)
         self.__set_state("closing")
 
     def die(self, message, exit_code=ExitCodes.Abort,
@@ -351,6 +357,36 @@ class Job(object):
                     os.unlink(_name)
 
         self.__state = new_state
+
+    def __set_exit_state(self, message, state, exit_code):
+        # Valid output states
+        _states = ('done', 'failed', 'aborted', 'killed')
+
+        if state not in _states:
+            raise Exception("Wrong job exit state: %s." % state)
+
+        # Prepend the state prefix to status message
+        _prefix = state[:1].upper() + state[1:]
+        _message = "%s:%s %s\n" % \
+            (_prefix, exit_code, message)
+
+        # Concatanate all status messages
+        self.__exit_message += _message
+        # Do not overwrite aborted or killed states
+        if self.__exit_state != 'aborted':
+            if self.__exit_state != 'killed' or state == 'aborted':
+                self.__exit_state = state
+                self.__exit_code = exit_code
+
+        # Store the exit info into a .opt file
+        _opt = os.path.join(conf.gate_path_jobs, self.id + ".opt")
+        with open(_opt) as _f:
+            _data = {
+                "exit_state": self.__exit_state,
+                "exit_code": self.__exit_code,
+                "exit_message": self.__exit_message
+            }
+            json.dump(_data, _f)
 
 
 class JobManager(object):

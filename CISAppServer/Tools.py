@@ -576,6 +576,8 @@ class Scheduler(object):
 
     def progress(self, job):
         """
+        Extract the job progress log and expose it to the user.
+
         :param job: :py:class:`Job` instance
         """
         # Output job progress log if it exists
