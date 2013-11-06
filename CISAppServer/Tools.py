@@ -15,6 +15,7 @@ import logging
 #import time
 
 from subprocess import Popen, PIPE, STDOUT
+from yapsy.PluginManager import PluginManager
 
 from Config import conf, VERBOSE
 
@@ -145,12 +146,15 @@ class Validator(object):
         self.jm = jm
         #: Current job instance
         self.job = None
+        #: PluginManager instance
+        self.pm = PluginManager()
 
         # Load all files from service_conf_path. Configuration files should be
         # in JSON format.
         logger.debug('@Validator - Loading services configurations.')
         _path = conf.service_path_conf
         _services = os.listdir(_path)
+        _plugins = []
         for _service in _services:
             #TODO validate options structure
             _file_name = os.path.join(_path, _service)
@@ -160,8 +164,19 @@ class Validator(object):
             with open(_file_name) as _f:
                 _data = conf.json_load(_f)
             self.services[_service] = Service(_data)
+
+            # Plugin
+            if 'plugin' in _data['config']:
+                _plugin_dir = os.path.join(conf.service_path_data, _service)
+                _plugin_dir = os.path.join(_plugin_dir, 'plugins')
+                _plugins.append(_plugin_dir)
+
             logger.info("Initialized service: %s" % _service)
         verbose(json.dumps(self.services))
+
+        # Load plugins
+        self.pm.setPluginPlaces(_plugins)
+        self.pm.collectPlugins()
 
     def validate(self, job):
         """
@@ -473,21 +488,15 @@ class Validator(object):
 
         return True
 
-    def validate_file(self, key, file_type, data_type, min, max):
-        #TODO How should I access job.id ??
-        _input_dir = os.path.join(conf.gate_path_input, self.job.id)
+    def validate_file(self, key, job, service):
+        """
+        :throws: Lots of stuff
+        """
+        _input_dir = os.path.join(conf.gate_path_input, job.id)
         _input_file = os.path.join(_input_dir, key)
-        if file_type == 'csv':
-            try:
-                return self.validate_file_csv(_input_file, data_type, min, max)
-            except:
-                logger.warning('@Validator - CSV validation failed.',
-                               exc_info=True)
-                return False
-        else:
-            logger.warning('@Validator - Unknown file type %s.' % file_type,
-                           exc_info=True)
-            return False
+        _plugin = self.pm.getPluginByName(service.variables[key]['plugin'],
+                                          service.name)
+        _plugin.plugin_object.validate(_input_file)
 
     def validate_file_csv(self, name, type, min, max):
         _f = open(name)
