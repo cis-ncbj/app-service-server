@@ -9,13 +9,14 @@ import json
 import shutil
 import time
 import logging
+import threading
 from datetime import datetime, timedelta
 from subprocess import Popen, PIPE, STDOUT
 
 import Tools as T
-from Config import conf
+from Config import conf, ExitCodes
 
-version = "0.2"
+version = "0.3"
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +50,11 @@ class Job(object):
         self.valid_data = {}
         #: List of job IDs whose output we would like to consume (job chaining)
         self.chain = []
-        self.__state = None
-        self.__size = 0
+        self.__state = None  # Current job state
+        self.__exit_message = ""  # Job exit message
+        self.__exit_state = None  # Job exit state
+        self.__exit_code = ExitCodes.Undefined  # Job exit code
+        self.__size = 0  # Job output size in bytes
 
         # Load job file from jobs directory
         try:
@@ -64,12 +68,29 @@ class Job(object):
                      exc_info=True)
             return None
 
+        # Load job state
         try:
             self.__check_state()
         except:
             self.die(u"@Job - Unable to check state (%s)." % self.id,
                      exc_info=True)
             return None
+
+        # Load job internal data
+        _name = os.path.join(conf.gate_path_opts, self.id)
+        if os.path.isfile(_name):
+            try:
+                with open(_name) as _f:
+                    _data = json.load(_f)
+                    if "exit_state" in _data.keys():
+                        self.__exit_state = _data["exit_state"]
+                    if "exit_code" in _data.keys():
+                        self.__exit_code = _data["exit_code"]
+                    if "exit_message" in _data.keys():
+                        self.__exit_message = _data["exit_message"]
+            except:
+                logger.error("@Job - Unable to load job info from: %s." %
+                             _name)
 
     def get_size(self):
         """
@@ -93,56 +114,99 @@ class Job(object):
             job reuest was processed and is queued in the scheduling backend,
         * running:
             job is running on a compute node,
+        * closing:
+            job has finished and is waiting for cleanup,
+        * cleanup:
+            job has finished and cleanup of resources is performed,
         * done:
             job has finished,
+        * failed:
+            job has finished with non zero exit code,
         * aborted:
             an error occurred during job preprocessing, submission or
             postprocessing,
         * killed:
-            job execution was stopped by an user,
-        * delete:
-            job is scheduled for removal
+            job was killed,
         """
 
         return self.__state
 
-    def set_state(self, new_state):
+    def get_exit_state(self):
         """
-        Change job state.
+        Get job "exit state" - the state that job will be put into after it is
+        finalised. The "exit state" is set using :py:meth:`finish`.
 
-        :param new_state: new sate for the job. For valid states see
-            :py:meth:`get_state`.
+        :return: One of valid job exit states or None if the "exit state" is
+        not yet defined:
+
+        * done:
+            job has finished,
+        * failed:
+            job has finished with non zero exit code,
+        * aborted:
+            an error occurred during job preprocessing, submission or
+            postprocessing,
+        * killed:
+            job was killed,
         """
-        logger.debug("@Job - Set new state: %s" % new_state)
 
-        if new_state not in conf.service_states:
-            raise Exception('Unknown job state %s.' % new_state)
+        return self.__exit_state
 
-        self.get_state()  # TODO - check_state ???
+    def queue(self):
+        """ Mark job as queued. """
+        self.__set_state('queued')
 
-        if self.__state == new_state:
-            return
+    def run(self):
+        """ Mark job as running. """
+        self.__set_state('running')
 
+    def cleanup(self):
+        """ Mark job as in cleanup state. """
+        self.__set_state('cleanup')
+
+    def delete(self):
+        """ Mark job for removal. """
         # Mark new state in the shared file system
         os.symlink(
             os.path.join(conf.gate_path_jobs, self.id),
-            os.path.join(conf.gate_path[new_state], self.id)
+            os.path.join(conf.gate_path_delete, self.id)
         )
 
-        # Remove all other possible states just in case we previously failed
-        for _state in conf.service_states:
-            if _state != new_state:
-                _name = os.path.join(conf.gate_path[_state], self.id)
-                if os.path.exists(_name):
-                    os.unlink(_name)
+    def mark(self, message, exit_code=ExitCodes.UserKill):
+        """
+        Mark job as killed by user.
 
-        self.__state = new_state
+        :param message: that will be passed to user,
+        :param exit_code: that will be set for this job.
+        """
+        # Mark as killed makes sense only for unfinished jobs
+        if self.get_state() not in ['waiting', 'queued', 'running']:
+            logger.warning("@Job - Job %s already finished, cannot mark as "
+                           "killed" % self.id)
+            return
 
-    def die(self, message, err=True, exc_info=False):
+        self.__set_exit_state(message, 'killed', exit_code)
+
+    def finish(self, message, state='done', exit_code=0):
+        """
+        Mark job as finished. Job will be set into *closing* state. When
+        cleanup is finished the :py:meth:`exit` method should be called to set
+        the job into its "exit state".
+
+        :param message: that will be passed to user,
+        :param state: Job state after cleanup will finish. One of:
+            ['done', 'failed', 'aborted', 'killed'],
+        :param exit_code: that will be set for this job.
+        """
+        self.__set_exit_state(message, state, exit_code)
+        self.__set_state("closing")
+
+    def die(self, message, exit_code=ExitCodes.Abort,
+            err=True, exc_info=False):
         """
         Abort further job execution with proper error in AppServer log as well
-        as with proper message for clinet in the job output status file. Sets
-        job state as *aborted*.
+        as with proper message for client in the job output status file. Sets
+        job state as *closing*. After cleanup the job state will be *aborted*.
 
         :param message: Message to be passed to logs and client,
         :param err: if True use log as ERROR otherwise use WARNING priority,
@@ -151,53 +215,41 @@ class Job(object):
             logger).
         """
 
-        self.exit(message, 'aborted')
         if err:
             logger.error(message, exc_info=exc_info)
         else:
             logger.warning(message, exc_info=exc_info)
 
-    def exit(self, message, state='done'):
+        try:
+            self.finish(message, 'aborted', exit_code)
+        except:
+            logger.error("@Job - Unable to mark job %s for finalise step." %
+                         self.id, exc_info=True)
+            self.__state = 'aborted'
+
+    def exit(self):
         """
-        Set one of job finished states and generate job output status file.
-
-        The output file is created on the shared storage so that the AppGateway
-        can pass the job status and the message to clients.
-
-        :param message: Message that will be written to the output status file.
-        :param state: Job state to set. Valid values are 'done', aborted',
-            'killed'
+        Finalise job cleanup by setting the state and passing the exit message
+        to the user.  Should be called only after Job.finish() method was
+        called.
         """
 
-        # Prefixes for output status messages
-        _states = {
-            'done': 'Done: ',
-            'failed': 'Failed: ',
-            'aborted': 'Aborted: ',
-            'killed': 'Killed: '
-        }
+        if self.__exit_state is None:
+            self.die("@Job - Exit status is not defined for job %s." %
+                     self.id)
+            return
 
-        # Only three output states are allowed
-        if state not in _states.keys():
-            _msg = "@Job - Wrong job exit status provided: %s." % state
-            message = _msg + 'Original message:\n' + message
-            state = 'aborted'
-
-        # Prepend the state prefix to status message
-        message = _states[state] + message + '\n'
         _name = os.path.join(conf.gate_path_exit, self.id)
         # Generate the output status file
         try:
-            self.set_state(state)
-            # Use append in case we got called several times due to consecutive
-            # errors
-            with open(_name, 'a') as _f:
-                _f.write(message)
+            self.__set_state(self.__exit_state)
+            with open(_name, 'w') as _f:
+                _f.write(self.__exit_message)
         except:
             logger.error("@Job - Cannot write to status file %s." % _name,
                          exc_info=True)
 
-        logger.info("Job %s finished: %s" % (self.id, state))
+        logger.info("Job %s finished: %s" % (self.id, self.__exit_state))
 
     def calculate_size(self):
         """
@@ -206,7 +258,7 @@ class Job(object):
         self.__size = 0
 
         # Only consider job states that could have an output dir
-        if self.__state not in ('done', 'failed', 'killed'):
+        if self.__state not in ('done', 'failed', 'killed', 'abort'):
             return
 
         try:
@@ -240,6 +292,9 @@ class Job(object):
         logger.debug("@Job - Job output size calculated: %s" % self.__size)
 
     def compact(self):
+        """
+        Release resources allocated for the job (data, valid_data).
+        """
         self.data = {}
         self.valid_data = {}
 
@@ -252,9 +307,7 @@ class Job(object):
         allow to reload them.
         """
 
-        if os.path.exists(os.path.join(conf.gate_path_delete, self.id)):
-            self.__state = 'delete'
-        elif os.path.exists(os.path.join(conf.gate_path_aborted, self.id)):
+        if os.path.exists(os.path.join(conf.gate_path_aborted, self.id)):
             self.__state = 'aborted'
         elif os.path.exists(os.path.join(conf.gate_path_killed, self.id)):
             self.__state = 'killed'
@@ -262,12 +315,85 @@ class Job(object):
             self.__state = 'failed'
         elif os.path.exists(os.path.join(conf.gate_path_done, self.id)):
             self.__state = 'done'
+        elif os.path.exists(os.path.join(conf.gate_path_cleanup, self.id)):
+            self.__state = 'cleanup'
+        elif os.path.exists(os.path.join(conf.gate_path_closing, self.id)):
+            self.__state = 'closing'
         elif os.path.exists(os.path.join(conf.gate_path_running, self.id)):
             self.__state = 'running'
         elif os.path.exists(os.path.join(conf.gate_path_queued, self.id)):
             self.__state = 'queued'
         elif os.path.exists(os.path.join(conf.gate_path_waiting, self.id)):
             self.__state = 'waiting'
+
+    def __set_state(self, new_state):
+        """
+        Change job state.
+
+        :param new_state: new sate for the job. For valid states see
+            :py:meth:`get_state`.
+        """
+        logger.debug("@Job - Set new state: %s" % new_state)
+
+        if new_state not in conf.service_states:
+            raise Exception('Unknown job state %s.' % new_state)
+
+        self.get_state()  # TODO - check_state ???
+
+        if self.__state == new_state:
+            return
+
+        # Mark new state in the shared file system
+        os.symlink(
+            os.path.join(conf.gate_path_jobs, self.id),
+            os.path.join(conf.gate_path[new_state], self.id)
+        )
+
+        # Remove all other possible states just in case we previously failed
+        for _state in conf.service_states:
+            if _state != new_state:
+                _name = os.path.join(conf.gate_path[_state], self.id)
+                if os.path.exists(_name):
+                    os.unlink(_name)
+
+        self.__state = new_state
+
+    def __set_exit_state(self, message, state, exit_code):
+        # Valid output states
+        _states = ('done', 'failed', 'aborted', 'killed')
+
+        if state not in _states:
+            raise Exception("Wrong job exit state: %s." % state)
+
+        # Prepend the state prefix to status message
+        _prefix = state[:1].upper() + state[1:]
+        _message = "%s:%s %s\n" % \
+            (_prefix, exit_code, message)
+
+        # Concatanate all status messages
+        self.__exit_message += _message
+        # Do not overwrite aborted or killed states
+        if self.__exit_state != 'aborted':
+            if self.__exit_state != 'killed' or state == 'aborted':
+                self.__exit_state = state
+                self.__exit_code = exit_code
+
+        # Store the exit info into a .opt file
+        _opt = os.path.join(conf.gate_path_opts, self.id)
+        try:
+            with open(_opt, 'w') as _f:
+                _data = {
+                    "exit_state": self.__exit_state,
+                    "exit_code": self.__exit_code,
+                    "exit_message": self.__exit_message
+                }
+                json.dump(_data, _f)
+        except:
+            if self.__exit_state != 'aborted':
+                raise
+            else:
+                logger.error('@Job - Unable to store job internal state',
+                             exc_info=True)
 
 
 class JobManager(object):
@@ -291,7 +417,7 @@ class JobManager(object):
         # Initialize Validator and PbsManager
         self.validator = T.Validator(self)  #: Validator instance
         self.schedulers = {  #: Scheduler interface instances
-            'pbs': T.PbsScheduler()
+            'pbs': T.PbsScheduler(self)
         }
         self.services = self.validator.services
 
@@ -305,6 +431,8 @@ class JobManager(object):
         self.__w_counter_quota = {}
         for _s in self.services.keys():
             self.__w_counter_quota[_s] = 0
+        # Thread list
+        self.__thread_list = []
 
         # Load existing jobs
         _list = os.listdir(conf.gate_path_jobs)
@@ -339,10 +467,12 @@ class JobManager(object):
         * waiting
         * queued
         * running
+        * closing
+        * cleanup
         * done
+        * failed
         * aborted
         * killed
-        * delete
         """
 
         _id_list = []
@@ -432,7 +562,7 @@ class JobManager(object):
 
             try:
                 if self.submit(_job):
-                    _job.set_state('queued')
+                    _job.queue()
                     self.services[_service_name].add_job_proxy(_job)
                 # Submit can return False when queue is full. Do not terminate
                 # job here so it can be resubmitted next time. If submission
@@ -445,7 +575,7 @@ class JobManager(object):
         """
         Check status of running jobs.
 
-        If finished jobs are found perform finalisation.
+        Finished jobs will be marked for finalisation
         """
 
         # Loop over supported schedulers
@@ -463,6 +593,7 @@ class JobManager(object):
                 )
                 continue
 
+            _jobs = []  # Active job list
             for _jid in _queue:
                 # Get Job object
                 _job = self.get_job(_jid)
@@ -481,25 +612,78 @@ class JobManager(object):
                         )
                     continue
 
-                # Get Job status
-                _status = _scheduler.status(_job)
-                if _status in ('done', 'failed', 'killed'):
-                    # Found finished job - finalise it
-                    logger.debug('@JManager - Detected finished job: %s.' %
-                                 _jid)
-                    _scheduler.finalise(_job)
-                if _status in ('done', 'failed', 'killed', 'aborted'):
-                    # Update service quota
-                    if os.path.isdir(
-                            os.path.join(conf.gate_path_output, _jid)):
-                        self.services[_job.service].update_job(_job)
-                    # Reduce memory footprint
-                    _job.compact()
-                if _status == 'unknown':
-                    logger.warning(
-                        "@JManager - Scheduler returned 'unknown' status "
-                        "for job %s" % _jid
-                    )
+                # Scheduler can change state for only running and waiting jobs.
+                # Disregard the rest.
+                _state = _job.get_state()
+                if _state == 'closing' or _state == 'cleanup':
+                    continue
+                elif _state == 'running' or _state == 'queued':
+                    _jobs.append(_job)
+                else:
+                    _job.die("@JManager - job state %s not allowed while in "
+                             "scheduler queue" % _state)
+
+            # Ask the scheduler to run the update
+            _scheduler.update(_jobs)
+
+    def check_cleanup(self):
+        """
+        Check jobs marked for cleanup.
+
+        Starts the cleanup for the jobs in separate threads.
+        """
+        # Jobs ready for cleanup are put into the "closing" directory
+        try:
+            _queue = os.listdir(conf.gate_path_closing)
+        except:
+            logger.error("@JManager - Unable to read cleanup queue %s" %
+                         conf.gate_path_closing, exc_info=True)
+            return
+
+        for _jid in _queue:
+            logger.debug('@JManager - Detected cleanup job %s.' % _jid)
+
+            # Create new job instance. It is possible that it is already
+            # created during initialization or while checking for old jobs to
+            # remove, therefore use self.get_job.
+            _job = self.get_job(_jid, create=True)
+            if _job is None:
+                continue
+
+            # Check for valid input data
+            if not _job.get_exit_state():
+                _job.die("@JManager - Job %s in closing state yet no exit "
+                         "state defined." % _jid)
+                continue
+            if not _job.valid_data:
+                if _job.get_exit_state() == 'aborted':
+                    _job.exit()
+                else:
+                    _job.die("@JManager - Job %s has \"%s\" exit state set yet"
+                             "there is no validated input data." %
+                             (_jid, _job.get_exit_state()))
+                continue
+
+            _scheduler = self.schedulers[_job.valid_data['CIS_SCHEDULER']]
+            # Run cleanup in separate threads
+            try:
+                if _job.get_exit_state() == 'aborted':
+                    _thread = threading.Thread(
+                        target=_scheduler.abort, args=(_job))
+                    _thread.start()
+                    self.__thread_list.append(_thread)
+                    logger.debug("@JManager - Abort cleanup thread started "
+                                 "for job %s" % _job.id)
+                else:
+                    _thread = threading.Thread(
+                        target=_scheduler.finalise, args=(_job))
+                    _thread.start()
+                    self.__thread_list.append(_thread)
+                    logger.debug("@JManager - Finalise cleanup thread started "
+                                 "for job %s" % _job.id)
+            except:
+                logger.error("@JManager - Unable to start cleanup thread "
+                             "for job %s" % _job.id, exc_info=True)
 
     def check_job_kill_requests(self):
         """
@@ -528,14 +712,15 @@ class JobManager(object):
             if _job.get_state() == 'running' or \
                     _job.get_state() == 'queued':
                 self.schedulers[_job.valid_data['CIS_SCHEDULER']].stop(
-                    _job, "User request"
+                    _job, 'User request', ExitCodes.UserKill
                 )
             elif _job.get_state() == 'waiting':
-                _job.set_state('killed')
+                _job.finish('User request', 'killed', ExitCodes.UserKill)
             else:
                 logger.warning("@JManager - Cannot kill job %s. "
                                "It is already finished." % _jid)
 
+            # Remove the kill mark
             try:
                 os.unlink(os.path.join(conf.gate_path_stop, _jid))
             except:
@@ -566,13 +751,17 @@ class JobManager(object):
             if _job is None:
                 continue
 
+            # Stop if it is running
+            if _job.get_state() in ('running', 'queued'):
+                self.schedulers[_job.valid_data['CIS_SCHEDULER']].stop(
+                    _job, "User request", ExitCodes.Delete
+                )
+                continue
+
+            if _job.get_state() in ('cleanup', 'running'):
+                continue
+
             try:
-                # Stop if it is running
-                if _job.get_state() == 'running' or \
-                        _job.get_state() == 'queued':
-                    self.schedulers[_job.valid_data['CIS_SCHEDULER']].stop(
-                        _job, "User request"
-                    )
                 # Remove job symlinks
                 for _state, _path in conf.gate_path.items():
                     _name = os.path.join(_path, _jid)
@@ -631,9 +820,13 @@ class JobManager(object):
             _dt = timedelta(hours=_delete_dt)
             _path = None
             try:
-                if _state in ['aborted']:
-                    _path = os.path.join(conf.gate_path_jobs, _jid)
-                elif _state in ['done', 'failed', 'killed']:
+                if _state in ['killed', 'aborted']:
+                    _path = os.path.join(conf.gate_path_output, _jid)
+                    # If job was killed in Waiting or Queued states it could
+                    # have not produced output
+                    if not os.path.isdir(_path):
+                        _path = os.path.join(conf.gate_path_jobs, _jid)
+                elif _state in ['done', 'failed']:
                     _path = os.path.join(conf.gate_path_output, _jid)
                 elif _state == 'running':
                     _path = os.path.join(conf.gate_path_running, _jid)
@@ -659,7 +852,14 @@ class JobManager(object):
             if _path_time < _now:
                 logger.info("@JManager - Job reached storage time limit. "
                             "Sheduling for removal.")
-                _job.set_state('delete')
+                _job.delete()
+
+        # Remove finished threads
+        for _thread in self.__thread_list:
+            if not _thread.isActive():
+                _thread.join()
+                del _thread
+                logger.debug("@JManager - Removed finished cleanup thread.")
 
     def collect_garbage(self, service, full=False):
         """
@@ -704,8 +904,10 @@ class JobManager(object):
             _path = None
             try:
                 # We consider only jobs that could have produced output
-                if _state in ['done', 'failed', 'killed']:
+                if _state in ['done', 'failed', 'killed', 'aborted']:
                     _path = os.path.join(conf.gate_path_output, _jid)
+                    if not os.path.isdir(_path):
+                        continue
                 else:
                     continue
 
@@ -736,7 +938,7 @@ class JobManager(object):
         for _item in _job_table:
             try:
                 _job = _item[1]
-                _job.set_state('delete')
+                _job.delete()
                 _service.remove_job_proxy(_job)
                 logger.debug("@JManager - Job garbage collected: %s." %
                              _job.id)
@@ -783,20 +985,42 @@ class JobManager(object):
         return False
 
     def shutdown(self):
+        """
+        Stop all running jobs.
+        """
         for _job in self.__jobs.values():
             _state = _job.get_state()
             if _state in ('done', 'failed', 'aborted', 'killed'):
                 continue
             if _state in ('queued', 'running'):
                 _scheduler = self.schedulers[_job.valid_data['CIS_SCHEDULER']]
-                _scheduler.stop(_job, 'Server shutdown')
+                _scheduler.stop(_job, 'Server shutdown', ExitCodes.Shutdown)
             else:
-                _job.exit('Server shutdown', state='killed')
+                _job.finish('Server shutdown', state='killed',
+                            exit_code=ExitCodes.Shutdown)
+
+        time.sleep(conf.config_shutdown_time)
+        self.check_cleanup()
+
+        for _job in self.__jobs.values():
+            _state = _job.get_state()
+            if _state in ('done', 'failed', 'aborted', 'killed'):
+                continue
+            else:
+                _job.finish('Server shutdown', state='killed',
+                            exit_code=ExitCodes.Shutdown)
+                _job.exit()
 
     def stop(self):
+        """
+        Pause the queue. New jobs will not be processed.
+        """
         self.__queue_running = False
 
     def start(self):
+        """
+        Restart the queue.
+        """
         self.__queue_running = True
 
     def run(self):
@@ -814,5 +1038,7 @@ class JobManager(object):
             if self.__queue_running:
                 self.check_new_jobs()
             self.check_running_jobs()
+            self.check_job_kill_requests()
+            self.check_cleanup()
             self.check_old_jobs()
             self.check_deleted_jobs()
