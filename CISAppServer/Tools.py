@@ -20,7 +20,7 @@ import logging
 
 from subprocess import Popen, PIPE, STDOUT
 
-from Config import conf, VERBOSE
+from Config import conf, VERBOSE, ExitCodes
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +181,8 @@ class Validator(object):
             return True
 
         if not job.data:
-            job.die("@Validator - Empty data dictionary")
+            job.die("@Validator - Empty data dictionary",
+                    exit_code=ExitCodes.Validate)
             return False
 
         _data = job.data
@@ -192,7 +193,8 @@ class Validator(object):
            _data['service'] not in self.services.keys() or \
            _data['service'] == 'default':
             job.die("@Validator - Not supported service: %s." %
-                    _data['service'], err=False)
+                    _data['service'], err=False,
+                    exit_code=ExitCodes.Validate)
             return False
 
         # Make sure that input dictionary exists
@@ -200,24 +202,26 @@ class Validator(object):
             _data['input'] = {}
         elif not isinstance(_data['input'], dict):
             job.die("@Validator - 'input' section is not a dictionary",
-                    err=False)
+                    err=False, exit_code=ExitCodes.Validate)
             return False
 
         # Make sure API level is correct
         if 'api' not in _data.keys():
-            job.die("@Validator - Job did not specify API level.", err=False)
+            job.die("@Validator - Job did not specify API level.", err=False,
+                    exit_code=ExitCodes.Validate)
             return False
         if not self.validate_float('api', _data['api'],
                                    self.api_min, self.api_max):
             job.die("@Validator - API level %s is not supported." %
-                    _data['api'], err=False)
+                    _data['api'], err=False, exit_code=ExitCodes.Validate)
             return False
 
         # Make sure no unsupported sections were passed
         for _k in _data.keys():
             if _k not in conf.service_allowed_sections:
                 job.die("@Validator - Section '%s' is not allowed in job "
-                        "definition." % _k, err=False)
+                        "definition." % _k, err=False,
+                        exit_code=ExitCodes.Validate)
                 return False
 
         job.service = _data['service']
@@ -245,14 +249,14 @@ class Validator(object):
                     job.die(
                         "@Validator - Set variables have to be of type int or "
                         "string. (%s: %s)" % (_k, _v),
-                        err=False
+                        err=False, exit_code=ExitCodes.Validate
                     )
                     return False
                 if _v != 1:
                     job.die(
                         "@Validator - Set variables only accept value of 1. "
                         "(%s: %s)" % (_k, _v),
-                        err=False
+                        err=False, exit_code=ExitCodes.Validate
                     )
                     return False
                 _variables.update(
@@ -265,13 +269,13 @@ class Validator(object):
         for _k, _v in _data['input'].items():
             if _k in conf.service_reserved_keys or _k.startswith('CIS_CHAIN'):
                 job.die("@Validator - '%s' variable name is restricted." % _k,
-                        err=False)
+                        err=False, exit_code=ExitCodes.Validate)
                 return False
             elif _k in _service.variables.keys():
                 _variables[_k] = _v
             else:
                 job.die("@Validator - Not supported variable: %s." % _k,
-                        err=False)
+                        err=False, exit_code=ExitCodes.Validate)
                 return False
 
         # Check that all attribute names are defined in service configuration
@@ -281,7 +285,7 @@ class Validator(object):
                 if not self.validate_value(_k, _v, _service):
                     job.die(
                         "@Validator - Variable value not allowed: %s - %s." %
-                        (_k, _v), err=False
+                        (_k, _v), err=False, exit_code=ExitCodes.Validate
                     )
                     return False
                 else:
@@ -296,7 +300,7 @@ class Validator(object):
                 if not self.validate_value(_k, _v, self.services['default']):
                     job.die(
                         "@Validator - Variable value not allowed: %s - %s." %
-                        (_k, _v), err=False
+                        (_k, _v), err=False, exit_code=ExitCodes.Validate
                     )
                     return False
                 else:
@@ -307,7 +311,7 @@ class Validator(object):
                     )
             else:
                 job.die("@Validator - Not supported variable: %s." % _k,
-                        err=False)
+                        err=False, exit_code=ExitCodes.Validate)
                 return False
 
         # Validate job output chaining. Check if defined job IDs point to
@@ -316,11 +320,12 @@ class Validator(object):
             if not isinstance(_data['chain'], list) and \
                not isinstance(_data['chain'], tuple):
                 job.die("@Validator - 'chain' section is not a list",
-                        err=False)
+                        err=False, exit_code=ExitCodes.Validate)
                 return False
 
             if not self.validate_chain(_data['chain']):
-                job.die("@Validator - Bad job chain IDs.", err=False)
+                job.die("@Validator - Bad job chain IDs.", err=False,
+                        exit_code=ExitCodes.Validate)
                 return False
             else:
                 job.chain = _data['chain']
@@ -821,8 +826,6 @@ class PbsScheduler(Scheduler):
         self.queue_path = conf.pbs_path_queue
         #: Default PBS queue
         self.default_queue = conf.pbs_default_queue
-        #: Username
-        self.user = conf.pbs_user
         #: Maximum number of concurent jobs
         self.max_jobs = conf.pbs_max_jobs
 
@@ -893,7 +896,7 @@ class PbsScheduler(Scheduler):
         :param jobs: A list of Job instances for jobs to be updated.
         """
         # Extract list of user names associated to the jobs
-        _users = ()
+        _users = []
         for _service in self.jm.services.values():
             if _service.config['username'] not in _users:
                 _users.append(_service.config['username'])
@@ -1097,6 +1100,7 @@ class PbsScheduler(Scheduler):
             return
 
         logger.debug("@PBS - Cleanup job: %s" % job.id)
+
         _work_dir = os.path.join(self.work_path, job.id)
         _out_dir = os.path.join(conf.gate_path_output, job.id)
 

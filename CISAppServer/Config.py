@@ -28,8 +28,9 @@ class ExitCodes:
     *  -98: Shutdown
     *  -97: Delete
     *  -96: UserKill
+    *  -95: Validate
     """
-    Undefined, Abort, Shutdown, Delete, UserKill = range(-100, -95)
+    Undefined, Abort, Shutdown, Delete, UserKill, Validate = range(-100, -94)
 
 
 class Config(dict):
@@ -62,6 +63,8 @@ class Config(dict):
         self.config_sleep_time = 3
         #: Every n-th status query dump the progress logs
         self.config_progress_step = 2
+        #: Timeout for job cleanup before forcing shutdown
+        self.config_shutdown_time = 2
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
@@ -168,6 +171,8 @@ class Config(dict):
         self.gate_path_jobs = None
         #: Path where jobs exit status is stored
         self.gate_path_exit = None
+        #: Path where jobs internal state is stored
+        self.gate_path_opts = None
         #: Path where waiting jobs are symlinked
         self.gate_path_waiting = None
         #: Path where queued jobs are symlinked
@@ -255,6 +260,7 @@ class Config(dict):
         # Generate subdir names
         self.gate_path_jobs = os.path.join(self.gate_path_shared, 'jobs')
         self.gate_path_exit = os.path.join(self.gate_path_shared, 'exit')
+        self.gate_path_opts = os.path.join(self.gate_path_shared, 'opts')
 
         # Generate job state subdirs
         self.gate_path_waiting = os.path.join(self.gate_path_shared, 'waiting')
@@ -292,6 +298,7 @@ class Config(dict):
             "gate_path_dump",
             "gate_path_jobs",
             "gate_path_exit",
+            "gate_path_opts",
             "gate_path_delete",
             "gate_path_stop",
             "gate_path_waiting",

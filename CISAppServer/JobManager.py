@@ -77,7 +77,7 @@ class Job(object):
             return None
 
         # Load job internal data
-        _name = os.path.join(conf.gate_path_jobs, self.id + '.opt')
+        _name = os.path.join(conf.gate_path_opts, self.id)
         if os.path.isfile(_name):
             try:
                 with open(_name) as _f:
@@ -243,7 +243,7 @@ class Job(object):
         # Generate the output status file
         try:
             self.__set_state(self.__exit_state)
-            with open(_name) as _f:
+            with open(_name, 'w') as _f:
                 _f.write(self.__exit_message)
         except:
             logger.error("@Job - Cannot write to status file %s." % _name,
@@ -379,14 +379,21 @@ class Job(object):
                 self.__exit_code = exit_code
 
         # Store the exit info into a .opt file
-        _opt = os.path.join(conf.gate_path_jobs, self.id + ".opt")
-        with open(_opt) as _f:
-            _data = {
-                "exit_state": self.__exit_state,
-                "exit_code": self.__exit_code,
-                "exit_message": self.__exit_message
-            }
-            json.dump(_data, _f)
+        _opt = os.path.join(conf.gate_path_opts, self.id)
+        try:
+            with open(_opt, 'w') as _f:
+                _data = {
+                    "exit_state": self.__exit_state,
+                    "exit_code": self.__exit_code,
+                    "exit_message": self.__exit_message
+                }
+                json.dump(_data, _f)
+        except:
+            if self.__exit_state != 'aborted':
+                raise
+            else:
+                logger.error('@Job - Unable to store job internal state',
+                             exc_info=True)
 
 
 class JobManager(object):
@@ -410,7 +417,7 @@ class JobManager(object):
         # Initialize Validator and PbsManager
         self.validator = T.Validator(self)  #: Validator instance
         self.schedulers = {  #: Scheduler interface instances
-            'pbs': T.PbsScheduler()
+            'pbs': T.PbsScheduler(self)
         }
         self.services = self.validator.services
 
@@ -665,11 +672,15 @@ class JobManager(object):
                         target=_scheduler.abort, args=(_job))
                     _thread.start()
                     self.__thread_list.append(_thread)
+                    logger.debug("@JManager - Abort cleanup thread started "
+                                 "for job %s" % _job.id)
                 else:
                     _thread = threading.Thread(
                         target=_scheduler.finalise, args=(_job))
                     _thread.start()
                     self.__thread_list.append(_thread)
+                    logger.debug("@JManager - Finalise cleanup thread started "
+                                 "for job %s" % _job.id)
             except:
                 logger.error("@JManager - Unable to start cleanup thread "
                              "for job %s" % _job.id, exc_info=True)
@@ -848,6 +859,7 @@ class JobManager(object):
             if not _thread.isActive():
                 _thread.join()
                 del _thread
+                logger.debug("@JManager - Removed finished cleanup thread.")
 
     def collect_garbage(self, service, full=False):
         """
@@ -984,7 +996,20 @@ class JobManager(object):
                 _scheduler = self.schedulers[_job.valid_data['CIS_SCHEDULER']]
                 _scheduler.stop(_job, 'Server shutdown', ExitCodes.Shutdown)
             else:
-                _job.exit('Server shutdown', state='killed')
+                _job.finish('Server shutdown', state='killed',
+                            exit_code=ExitCodes.Shutdown)
+
+        time.sleep(conf.config_shutdown_time)
+        self.check_cleanup()
+
+        for _job in self.__jobs.values():
+            _state = _job.get_state()
+            if _state in ('done', 'failed', 'aborted', 'killed'):
+                continue
+            else:
+                _job.finish('Server shutdown', state='killed',
+                            exit_code=ExitCodes.Shutdown)
+                _job.exit()
 
     def stop(self):
         """
