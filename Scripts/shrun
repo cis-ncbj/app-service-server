@@ -1,0 +1,62 @@
+#!/bin/bash
+
+usage() {
+    echo "Usage: shrun [-h] -i ID -o OUT command [args]"
+    echo ""
+    echo "Run a command in background. Pass the child PID through a named FIFO."
+    echo "Store child exit code in a file."
+    echo " -h      : display this message"
+    echo " -i ID   : job id"
+    echo " -o OUT  : name of the output log file"
+    echo " command : the command to execute"
+    echo " args    : command argument list"
+    exit 1
+}
+
+# Option parser
+while getopts i:o:h OPT
+do
+    case $OPT in
+        (i)
+            ID=$OPTARG
+            ;;
+        (o)
+            OUT=$OPTARG
+            ;;
+        (h | ?)
+            usage
+            ;;
+    esac
+done
+
+# Remove parsed args
+N=1
+while [[ $N < $OPTIND ]]
+do
+    shift
+    let N+=1
+done
+
+# Check for required args
+if [ -z "$ID" ] || [ -z "$OUT" ] || [[ $# == 0 ]]
+then
+    echo Missing arguments ...
+    usage
+fi
+
+# Child process PID is writen into the PIPE
+# The child exit code is the stored in EXIT
+DIR=/tmp/$USER/shpool
+PIPE=$DIR/$ID.pipe
+EXIT=$DIR/$ID.dat
+
+# Run the command
+( $@ > $OUT 2>&1 ) &
+PID=$!
+
+# Output the child PID
+echo $PID > $PIPE
+
+# Wait for the child to finish and store the exit code
+wait $PID
+echo $? > $EXIT

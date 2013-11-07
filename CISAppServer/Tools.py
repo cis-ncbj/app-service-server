@@ -615,36 +615,111 @@ class Scheduler(object):
         """
         Prepare output of finished job.
 
-        Job working directory is moved to the output_path directory.
+        Job working directory is moved to the external_data_path directory.
 
         :param job: :py:class:`Job` instance
-        :return: True on success and False otherwise.
         """
-        # Make sure all files in the output directory are world readable - so
-        # that apache can actually serve them
+
+        # Mark job as in cleanup state
         try:
-            _out_dir = os.path.join(conf.gate_path_output, job.id)
-            if os.path.isdir(_out_dir):
-                logger.debug(
-                    '@Scheduler - Make output directory world readable')
-                os.chmod(_out_dir, os.stat(_out_dir).st_mode |
-                         stat.S_IRUSR | stat.S_IXUSR |
-                         stat.S_IRGRP | stat.S_IXGRP |
-                         stat.S_IROTH | stat.S_IXOTH)
-                for _root, _dirs, _files in os.walk(_out_dir):
-                    for _dir in _dirs:
-                        _name = os.path.join(_root, _dir)
-                        os.chmod(_name, os.stat(_name).st_mode |
-                                 stat.S_IRUSR | stat.S_IXUSR |
-                                 stat.S_IRGRP | stat.S_IXGRP |
-                                 stat.S_IROTH | stat.S_IXOTH)
-                    for _file in _files:
-                        _name = os.path.join(_root, _file)
-                        os.chmod(_name, os.stat(_name).st_mode |
-                                 stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+            job.cleanup()
         except:
-            job.die("@Scheduler - Unable to correct permissions for job "
-                    "output directory %s" % _out_dir, exc_info=True)
+            job.die("@Scheduler - Unable to set state for job %s." % job.id)
+            return
+
+        logger.debug("@Scheduler - Retrive job output: %s" % job.id)
+        _work_dir = os.path.join(self.work_path, job.id)
+
+        # Cleanup of the output
+        try:
+            os.unlink(os.path.join(self.queue_path, job.id))
+            for _chain in job.chain:
+                shutil.rmtree(os.path.join(_work_dir, _chain),
+                              ignore_errors=True)
+        except:
+            logger.error("@Scheduler - Unable to clean up job output "
+                         "directory %s" % _work_dir, exc_info=True)
+
+        try:
+            # Remove output dir if it exists.
+            _out_dir = os.path.join(conf.gate_path_output, job.id)
+            _dump_dir = os.path.join(conf.gate_path_dump, job.id)
+            if os.path.isdir(_out_dir):
+                logger.debug('@Scheduler - Remove existing output directory')
+                # out and dump should be on the same partition so that rename
+                # is used. This will make sure that processes reading from out
+                # will not cause rmtree to throw exceptions
+                shutil.move(_out_dir, _dump_dir)
+                shutil.rmtree(_dump_dir, ignore_errors=True)
+            shutil.move(_work_dir, conf.gate_path_output)
+
+            # Make sure all files in the output directory are world readable -
+            # so that apache can actually serve them
+            logger.debug('@Scheduler - Make output directory world readable')
+            os.chmod(_out_dir, os.stat(_out_dir).st_mode |
+                     stat.S_IRUSR | stat.S_IXUSR |
+                     stat.S_IRGRP | stat.S_IXGRP |
+                     stat.S_IROTH | stat.S_IXOTH)
+            for _root, _dirs, _files in os.walk(_out_dir):
+                for _dir in _dirs:
+                    _name = os.path.join(_root, _dir)
+                    os.chmod(_name, os.stat(_name).st_mode |
+                             stat.S_IRUSR | stat.S_IXUSR |
+                             stat.S_IRGRP | stat.S_IXGRP |
+                             stat.S_IROTH | stat.S_IXOTH)
+                for _file in _files:
+                    _name = os.path.join(_root, _file)
+                    os.chmod(_name, os.stat(_name).st_mode |
+                             stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+        except:
+            job.die("@Scheduler - Unable to retrive job output directory %s" %
+                    _work_dir, exc_info=True)
+            return
+
+        # Set job exit state
+        job.exit()
+
+    def abort(self, job):
+        """
+        Cleanup aborted job.
+
+        Removes working and output directories.
+
+        :param job: :py:class:`Job` instance
+        """
+
+        # Mark job as in cleanup state
+        try:
+            job.cleanup()
+        except:
+            job.die("@Scheduler - Unable to set state for job %s." % job.id)
+            return
+
+        logger.debug("@Scheduler - Cleanup job: %s" % job.id)
+
+        _work_dir = os.path.join(self.work_path, job.id)
+        _out_dir = os.path.join(conf.gate_path_output, job.id)
+
+        # Remove output dir if it exists.
+        if os.path.isdir(_out_dir):
+            logger.debug('@Scheduler - Remove existing output directory')
+            shutil.rmtree(_out_dir, ignore_errors=True)
+        # Remove work dir if it exists.
+        if os.path.isdir(_work_dir):
+            logger.debug('@Scheduler - Remove working directory')
+            shutil.rmtree(_work_dir, ignore_errors=True)
+
+        if os.path.isdir(_out_dir):
+            logger.error("@Scheduler - Unable to remove job output directory: "
+                         "%s" % job.id, exc_info=True)
+        if os.path.isdir(_out_dir):
+            logger.error("@Scheduler - Unable to remove job working "
+                         "directory: %s" % job.id, exc_info=True)
+        else:
+            logger.info("Job %s cleaned." % job.id)
+
+        # Set job exit state
+        job.exit()
 
     def generate_scripts(self, job):
         """
@@ -840,12 +915,12 @@ class PbsScheduler(Scheduler):
 
         # Check that maximum job limit is not exceeded
         try:
-            _queue = os.listdir(self.queue_path)
+            _jobs = os.listdir(self.queue_path)
         except:
             logger.error("@PBS - unable to read queue directory %s." %
                          self.queue_path, exc_info=True)
             return False
-        if len(_queue) >= self.max_jobs:
+        if len(_jobs) >= self.max_jobs:
             return False
 
         # Path names
@@ -1032,95 +1107,237 @@ class PbsScheduler(Scheduler):
         # Mark as killed by user
         job.mark(msg, exit_code)
 
-    def finalise(self, job):
-        """
-        Prepare output of finished job.
 
-        Job working directory is moved to the external_data_path directory.
+class SshScheduler(Scheduler):
+    """
+    Class implementing simple interface for job execution through SSH.
+
+    Allows for job submission, deletion and extraction of job status.
+    """
+
+    def __init__(self, jm):
+        super(SshScheduler, self).__init__(jm)
+        #: SSH Working directory path
+        self.work_path = conf.ssh_path_work
+        #: Path where submitted SSH job IDs are stored
+        self.queue_path = conf.ssh_path_queue
+        #: Default SSH execute host
+        self.default_queue = conf.ssh_default_queue
+        #: Dict of maximum number of concurent jobs per execution host
+        self.max_jobs = conf.ssh_max_jobs
+
+    def submit(self, job):
+        """
+        Submit a job to execution host via SSH queue. The "pbs.sh" script
+        should be already present in the ssh_work_path/job directory.
 
         :param job: :py:class:`Job` instance
+        :return: True on success and False otherwise.
         """
 
-        # Mark job as in cleanup state
-        try:
-            job.cleanup()
-        except:
-            job.die("@PBS - Unable to set state for job %s." % job.id)
-            return
+        # Select execution host
+        _queue = self.default_queue
+        if job.valid_data['CIS_SSH_HOST'] != "":
+            _queue = job.valid_data['CIS_SSH_HOST']
 
-        logger.debug("@PBS - Retrive job output: %s" % job.id)
+        # Check that maximum job limit is not exceeded
+        try:
+            _jobs = os.listdir(self.queue_path)
+        except:
+            logger.error("@PBS - unable to read queue directory %s." %
+                         self.queue_path, exc_info=True)
+            return False
+        if len(_jobs) >= self.max_jobs[_queue]:
+            return False
+
+        # Path names
         _work_dir = os.path.join(self.work_path, job.id)
-
-        # Cleanup of the output
-        try:
-            os.unlink(os.path.join(self.queue_path, job.id))
-            for _chain in job.chain:
-                shutil.rmtree(os.path.join(_work_dir, _chain),
-                              ignore_errors=True)
-        except:
-            logger.error("@PBS - Unable to clean up job output directory %s" %
-                         _work_dir, exc_info=True)
+        _run_script = os.path.join(_work_dir, "pbs.sh")
+        _output_log = os.path.join(_work_dir, "output.log")
 
         try:
-            # Remove output dir if it exists.
-            _out_dir = os.path.join(conf.gate_path_output, job.id)
-            _dump_dir = os.path.join(conf.gate_path_dump, job.id)
-            if os.path.isdir(_out_dir):
-                logger.debug('@PBS - Remove existing output directory')
-                # out and dump should be on the same partition so that rename
-                # is used. This will make sure that processes reading from out
-                # will not cause rmtree to throw exceptions
-                shutil.move(_out_dir, _dump_dir)
-                shutil.rmtree(_dump_dir, ignore_errors=True)
-            shutil.move(_work_dir, conf.gate_path_output)
-            super(PbsScheduler, self).finalise(job)
-            logger.info("Job %s output retrived." % job.id)
+            # Submit
+            logger.debug("@SSH - Submitting new job")
+            # Run qsub with proper user permissions
+            _user = job.service.config['username']
+            _shsub = os.path.join(os.path.dirname(conf.daemon_path_installdir),
+                                  "Scripts")
+            _shsub = os.path.join(_shsub, "shsub")
+            _comm = "%s -i %s -d %s -o %s %s" % \
+                    (_shsub, job.id, _work_dir, _output_log, _run_script)
+            _opts = ["/usr/bin/ssh", "-l", _user, _queue, _comm]
+            logger.debug("@SSH - Running command: %s" % str(_opts))
+            _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
+            _output = _proc.communicate()
+            # Hopefully shsub returned meaningful job ID
+            _jid = _output[0]
+            # Check return code. If ssh was not killed by signal Popen will
+            # not rise an exception
+            if _proc.returncode != 0:
+                raise OSError((
+                    _proc.returncode,
+                    "shsub returned non zero exit code.\n%s" %
+                    str(_output)
+                ))
         except:
-            job.die("@PBS - Unable to retrive job output directory %s" %
-                    _work_dir, exc_info=True)
-            return
+            job.die("@SSH - Unable to submit job %s." % job.id, exc_info=True)
+            return False
 
-        # Set job exit state
-        job.exit()
+        # Store the SSH job ID into a file
+        with open(os.path.join(self.queue_path, job.id), 'w') as _jid_file:
+            _jid_file.write(_jid)
+        logger.info("Job successfully submitted: %s" % job.id)
+        return True
 
-    def abort(self, job):
+    def update(self, jobs):
         """
-        Cleanup aborted job.
+        Update job states to match their current state on SSH execution host.
 
-        Removes working and output directories.
+        :param jobs: A list of Job instances for jobs to be updated.
+        """
+        # Extract list of user names and queues associated to the jobs
+        _users = {}
+        for _job in jobs:
+            _service = _job.service
+            _usr = _service.config['username']
+            if _usr not in _users.keys():
+                _users[_usr] = []
+            _queue = self.default_queue
+            if _job.valid_data['CIS_SSH_HOST'] != "":
+                _queue = _job.valid_data['CIS_SSH_HOST']
+            if _queue not in _users[_usr]:
+                _users[_usr].append(_queue)
+
+        # We agregate the jobs by user. This way one qstat call per user is
+        # required instead of on call per job
+        _job_states = {}
+        for _usr, _queues in _users.items():
+            for _queue in _queues:
+                try:
+                    # Run qstat
+                    logger.debug("@SSH - Check jobs state for user %s @ "
+                                 "host %s" % (_usr, _queue))
+                    _shstat = os.path.join(
+                        os.path.dirname(conf.daemon_path_installdir),
+                        "Scripts"
+                    )
+                    _shstat = os.path.join(_shstat, "shstat")
+                    _opts = ["/usr/bin/ssh", "-l", _usr, _queue, _shstat]
+                    _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
+                    _output = _proc.communicate()[0]
+                    # Check return code. If ssh was not killed by signal Popen
+                    # will not rise an exception
+                    if _proc.returncode != 0:
+                        raise OSError((
+                            _proc.returncode,
+                            "shstat returned non zero exit code.\n%s" %
+                            str(_output)
+                        ))
+                except:
+                    logger.error("@SSH - Unable to check jobs state.",
+                                 exc_info=True)
+                    return
+
+                for _line in _output.splitlines():
+                    _jid, _state = _line.split(" ")
+                    _job_states[_jid] = _state
+
+        # Iterate through jobs
+        for _job in jobs:
+            # Extract SSH id for the job
+            _pid = ''
+            try:
+                with open(os.path.join(self.queue_path, _job.id)) as _ssh_file:
+                    _pid = _ssh_file.readline().strip()
+            except:
+                _job.die('@SSH - Unable to read job PID', exc_info=True)
+
+            # Check if the job exists on a SSH execution host
+            if _pid not in _job_states.keys():
+                _job.die('@SSH - Job does not exist on any of the SSH '
+                         'execution hosts')
+            else:
+                # Update job progress output
+                self.progress(_job)
+                _state = int(_job_states[_pid])
+                # Job has finished. Check the exit code.
+                if _state >= 0:
+                    _new_state = 'done'
+                    _msg = 'Job finished succesfully'
+                    if _state > 128:
+                        _new_state = 'killed'
+                        _msg = 'Job was killed by a signal'
+                    elif _state > 0:
+                        _new_state = 'failed'
+                        _msg = 'Job finished with error code'
+                    try:
+                        _job.finish(_msg, _new_state, _state)
+                    except:
+                        _job.die('@SSH - Unable to set job state (%s : %s)' %
+                                 (_new_state, _job.id), exc_info=True)
+                # Job is running
+                elif _state == -1:
+                    if _job.get_state() != 'running':
+                        try:
+                            _job.run()
+                        except:
+                            _job.die("@SSH - Unable to set job state "
+                                     "(running : %s)" % _job.id, exc_info=True)
+                # Treat all other states as queued
+                else:
+                    _new_state = 'failed'
+                    _msg = 'Job finished with unknown exit state'
+                    try:
+                        _job.finish(_msg, _new_state, _state)
+                    except:
+                        _job.die('@SSH - Unable to set job state (%s : %s)' %
+                                 (_new_state, _job.id), exc_info=True)
+
+    def stop(self, job, msg, exit_code):
+        """
+        Stop running job and remove it from SSH queue.
 
         :param job: :py:class:`Job` instance
+        :param msg: Message that will be passed to the user
         """
+        _pid = ''
 
-        # Mark job as in cleanup state
+        # Get Job PID
         try:
-            job.cleanup()
+            with open(os.path.join(self.queue_path, job.id)) as _ssh_file:
+                _pid = _ssh_file.readline().strip()
         except:
-            job.die("@PBS - Unable to set state for job %s." % job.id)
+            job.die('@SSH - Unable to read PID', exc_info=True)
             return
 
-        logger.debug("@PBS - Cleanup job: %s" % job.id)
+        # Run qdel
+        try:
+            logger.debug("@SSH - Killing job")
+            # Run qdel with proper user permissions
+            _usr = job.service.config['username']
+            _queue = self.default_queue
+            if job.valid_data['CIS_SSH_HOST'] != "":
+                _queue = job.valid_data['CIS_SSH_HOST']
+            _shdel = os.path.join(
+                os.path.dirname(conf.daemon_path_installdir),
+                "Scripts"
+            )
+            _shdel = os.path.join(_shdel, "shdel")
+            _opts = ["/usr/bin/ssh", "-l", _usr, _queue, _shdel, _pid]
+            _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
+            _output = _proc.communicate()[0]
+            # Check return code. If ssh was not killed by signal Popen will
+            # not rise an exception
+            if _proc.returncode != 0:
+                raise OSError((
+                    _proc.returncode,
+                    "shdel returned non zero exit code.\n%s" %
+                    str(_output)
+                ))
+        except:
+            job.die("@SSH - Unable to terminate job %s." %
+                    job.id, exc_info=True)
+            return
 
-        _work_dir = os.path.join(self.work_path, job.id)
-        _out_dir = os.path.join(conf.gate_path_output, job.id)
-
-        # Remove output dir if it exists.
-        if os.path.isdir(_out_dir):
-            logger.debug('@PBS - Remove existing output directory')
-            shutil.rmtree(_out_dir, ignore_errors=True)
-        # Remove work dir if it exists.
-        if os.path.isdir(_work_dir):
-            logger.debug('@PBS - Remove working directory')
-            shutil.rmtree(_work_dir, ignore_errors=True)
-
-        if os.path.isdir(_out_dir):
-            logger.error("@PBS - Unable to remove job output directory: %s" %
-                         job.id, exc_info=True)
-        if os.path.isdir(_out_dir):
-            logger.error("@PBS - Unable to remove job working directory: %s" %
-                         job.id, exc_info=True)
-        else:
-            logger.info("Job %s cleaned." % job.id)
-
-        # Set job exit state
-        job.exit()
+        # Mark as killed by user
+        job.mark(msg, exit_code)
