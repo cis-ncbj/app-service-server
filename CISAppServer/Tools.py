@@ -994,7 +994,7 @@ class PbsScheduler(Scheduler):
             _comm = "/usr/bin/qsub -q %s -d %s -j oe -o %s " \
                     "-l epilogue=epilogue.sh %s" % \
                     (_queue, _work_dir, _output_log, _run_script)
-            _opts = ["/bin/su", "-c", _comm, _user]
+            _opts = ['/usr/bin/ssh', '-l', _user, 'localhost', _comm]
             verbose("@PBS - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()[0]
@@ -1061,8 +1061,8 @@ class PbsScheduler(Scheduler):
                 _xroot = ET.fromstring(_output)
                 for _xjob in _xroot.iter('Job'):
                     _xjid = _xjob.find('Job_Id').text
-                    _xstate = _xjob.get('job_state')
-                    _xexit = _xjob.get('exit_status')
+                    _xstate = _xjob.find('job_state').text
+                    _xexit = _xjob.find('exit_status')
                     if _xexit is not None:
                         _xexit = _xexit.text
                     _job_states[_xjid] = (_xstate, _xexit)
@@ -1070,6 +1070,7 @@ class PbsScheduler(Scheduler):
                 logger.error("@PBS - Unable to parse qstat output.",
                              exc_info=True)
                 return
+            verbose(_job_states)
 
         # Iterate through jobs
         for _job in jobs:
@@ -1090,24 +1091,30 @@ class PbsScheduler(Scheduler):
                 _new_state = 'queued'
                 _exit_code = 0
                 _state = _job_states[_pbs_id]
+                verbose("@PBS - Current job state: '%s' (%s)" %
+                        (_state[0], _job.id))
                 # Job has finished. Check the exit code.
                 if _state[0] == 'C':
                     _new_state = 'done'
                     _msg = 'Job finished succesfully'
-                    _exit_code = _state[1]
-                    if _exit_code is None or int(_exit_code) > 256:
+                    _exit_code = int(_state[1])
+                    if _exit_code is None or _exit_code > 256:
                         _new_state = 'killed'
                         _msg = 'Job was killed by the scheduler'
-                    elif int(_exit_code) > 0:
+                    elif _exit_code > 128:
+                        _new_state = 'killed'
+                        _msg = 'Job was killed'
+                    elif _exit_code > 0:
                         _new_state = 'failed'
                         _msg = 'Job finished with error code'
+
                     try:
                         _job.finish(_msg, _new_state, _exit_code)
                     except:
                         _job.die('@PBS - Unable to set job state (%s : %s)' %
                                  (_new_state, _job.id), exc_info=True)
                 # Job is running
-                if _state[0] == 'R' or _state[0] == 'E':
+                elif _state[0] == 'R' or _state[0] == 'E':
                     if _job.get_state() != 'running':
                         try:
                             _job.run()
@@ -1145,12 +1152,13 @@ class PbsScheduler(Scheduler):
             logger.debug("@PBS - Killing job")
             # Run qdel with proper user permissions
             _user = self.jm.services[job.service].config['username']
-            _opts = ["/bin/su", "-c", "/usr/bin/qdel %s" % _pbs_id, _user]
+            _opts = ['/usr/bin/ssh', '-l', _user, 'localhost',
+                     "/usr/bin/qdel %s" % _pbs_id]
             verbose("@PBS - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()[0]
             verbose(_output)
-            # Check return code. If qstat was not killed by signal Popen will
+            # Check return code. If qdel was not killed by signal Popen will
             # not rise an exception
             if _proc.returncode != 0:
                 raise OSError((
@@ -1268,13 +1276,13 @@ class SshScheduler(Scheduler):
             if _queue not in _users[_usr]:
                 _users[_usr].append(_queue)
 
-        # We agregate the jobs by user. This way one qstat call per user is
+        # We agregate the jobs by user. This way one shstat call per user is
         # required instead of on call per job
         _job_states = {}
         for _usr, _queues in _users.items():
             for _queue in _queues:
                 try:
-                    # Run qstat
+                    # Run shtat
                     logger.debug("@SSH - Check jobs state for user %s @ %s" %
                                  (_usr, _queue))
                     _shstat = os.path.join(
