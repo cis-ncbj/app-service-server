@@ -1,20 +1,23 @@
 #!/bin/bash
 
 usage() {
-    echo "Usage: shrun [-h] -i ID -o OUT command [args]"
+    echo "Usage: shrun [-h] -i ID -o OUT [-d DIR] command [args]"
     echo ""
     echo "Run a command in background. Pass the child PID through a named FIFO."
     echo "Store child exit code in a file."
     echo " -h      : display this message"
     echo " -i ID   : job id"
     echo " -o OUT  : name of the output log file"
+    echo " -d DIR  : Working directory"
     echo " command : the command to execute"
     echo " args    : command argument list"
     exit 1
 }
 
+WORKDIR=$PWD
+
 # Option parser
-while getopts i:o:h OPT
+while getopts i:o:d:h OPT
 do
     case $OPT in
         (i)
@@ -22,6 +25,9 @@ do
             ;;
         (o)
             OUT=$OPTARG
+            ;;
+        (d)
+            WORKDIR=$OPTARG
             ;;
         (h | ?)
             usage
@@ -50,6 +56,7 @@ DIR=/tmp/$USER/shpool
 PIPE=$DIR/$ID.pipe
 EXIT=$DIR/$ID.dat
 
+cd $WORKDIR
 # Run the command
 ( $@ > $OUT 2>&1 ) &
 PID=$!

@@ -57,13 +57,22 @@ class Service(dict):
     Class implementing a Service.
 
     Stores Service configuration and monitors its state.
+
     """
-    def __init__(self, data, *args, **kwargs):
+    def __init__(self, name, data, *args, **kwargs):
+        """Service C-tor
+
+        :param name: The name of the service.
+        :param data: Dict with service config read from JSON data file.
+        Other arguments are passed to dict parent class.
+        """
         # Service is a dict. Make all the keys accessible as attributes while
         # retaining the dict API
         super(Service, self).__init__(*args, **kwargs)
         self.__dict__ = self
 
+        #: Service name
+        self.name = name
         #: Configuration options affecting service handling - like allowed
         #: diskspace and garbage collection
         self.config = {
@@ -85,40 +94,80 @@ class Service(dict):
         self.real_size = 0
         #: Projection of space usage by service output files
         self.current_size = 0
+        # List of current job proxies. Job proxies are used to calculate
+        # current service quota. Will be removed by the garbage collector to
+        # indicate change in quota due to jobs scheduled for removal (but not
+        # yet renmoved physically)
         self.__job_proxies = []
-        self.__jobs = []
+        self.__jobs = []  # List of current jobs with known size
 
         # Covert quota and job_size to bytes from MB
         self.config['quota'] = self.config['quota'] * 1000000
         self.config['job_size'] = self.config['job_size'] * 1000000
 
     def add_job_proxy(self, job):
+        """
+        Add new job proxy. The current service quota usage will increase by the
+        amount defined in service config by job_size variable.
+
+        :param job: :py:class:`Job` instance
+        """
         if job.id in self.__job_proxies:
             logger.error("@Service - Job proxy already exists: %s" % job.id)
             return
 
         self.current_size += self.config['job_size']
         self.__job_proxies.append(job.id)
+        verbose("@Service - Allocated %s MB for job proxy (%s)." %
+                ((self.config['job_size']/1000000), self.name))
 
     def remove_job_proxy(self, job):
+        """
+        Remove a job proxy. The current service quota usage will decrease by
+        the job size. Job size should have been determined by the update_job
+        call.
+
+        :param job: :py:class:`Job` instance
+        """
         if job.id in self.__job_proxies:
             self.__job_proxies.remove(job.id)
             self.current_size -= job.get_size()
 
+        verbose("@Service - Reclaimed %s MB of storage from soft "
+                "quota (%s)." % ((job.get_size()/1000000), self.name))
+
     def update_job(self, job):
+        """
+        Calculate the current size of the output files of the job. Adjusts
+        usage of the current and real quotas for the service.
+
+        :param job: :py:class:`Job` instance
+        """
+        _change = 0
         if job.id in self.__jobs:
-            logger.error("@Service - Job already exists: %s" % job.id)
-            return
-        self.__jobs.append(job.id)
-        if job.id in self.__job_proxies:
-            self.current_size -= self.config['job_size']
+            _change -= job.get_size()
+            self.current_size -= job.get_size()
+            self.real_size -= job.get_size()
         else:
-            self.__job_proxies.append(job.id)
+            self.__jobs.append(job.id)
+            if job.id in self.__job_proxies:
+                _change -= self.config['job_size']
+                self.current_size -= self.config['job_size']
+            else:
+                self.__job_proxies.append(job.id)
         job.calculate_size()
+        _change += job.get_size()
         self.current_size += job.get_size()
         self.real_size += job.get_size()
+        verbose("@Service - Storage usage adjusted by %s MB (%s)." %
+                ((_change/1000000), self.name))
 
     def remove_job(self, job):
+        """
+        Remove the job and its proxy. Adjust the usage of the service quota.
+
+        :param job: :py:class:`Job` instance
+        """
         if job.id not in self.__jobs:
             logger.error("@Service - Job does not exist: %s" % job.id)
             return
@@ -127,6 +176,8 @@ class Service(dict):
             self.current_size -= job.get_size()
         self.__jobs.remove(job.id)
         self.real_size -= job.get_size()
+        verbose("@Service - Reclaimed %s MB of storage (%s)." %
+                ((job.get_size()/1000000), self.name))
 
 
 class Validator(object):
@@ -162,7 +213,7 @@ class Validator(object):
                 continue
             with open(_file_name) as _f:
                 _data = conf.json_load(_f)
-            self.services[_service] = Service(_data)
+            self.services[_service] = Service(_service, _data)
             logger.info("Initialized service: %s" % _service)
         verbose(json.dumps(self.services))
 
@@ -588,7 +639,7 @@ class Scheduler(object):
         # Output job progress log if it exists
         # The progres log is extraced every n-th status check
         if Scheduler.__progress_step >= conf.config_progress_step:
-            logger.debug('@Scheduler - Extracting progress log')
+            logger.debug("@Scheduler - Extracting progress log (%s)" % job.id)
             _work_dir = os.path.join(self.work_path, job.id)
             _output_dir = os.path.join(conf.gate_path_output, job.id)
             _progress_file = os.path.join(_work_dir, 'progress.log')
@@ -619,13 +670,6 @@ class Scheduler(object):
 
         :param job: :py:class:`Job` instance
         """
-
-        # Mark job as in cleanup state
-        try:
-            job.cleanup()
-        except:
-            job.die("@Scheduler - Unable to set state for job %s." % job.id)
-            return
 
         logger.debug("@Scheduler - Retrive job output: %s" % job.id)
         _work_dir = os.path.join(self.work_path, job.id)
@@ -676,6 +720,10 @@ class Scheduler(object):
                     _work_dir, exc_info=True)
             return
 
+        # Update service quota
+        self.jm.services[job.service].update_job(job)
+        # Reduce memory footprint
+        job.compact()
         # Set job exit state
         job.exit()
 
@@ -688,17 +736,19 @@ class Scheduler(object):
         :param job: :py:class:`Job` instance
         """
 
-        # Mark job as in cleanup state
-        try:
-            job.cleanup()
-        except:
-            job.die("@Scheduler - Unable to set state for job %s." % job.id)
-            return
-
         logger.debug("@Scheduler - Cleanup job: %s" % job.id)
 
         _work_dir = os.path.join(self.work_path, job.id)
         _out_dir = os.path.join(conf.gate_path_output, job.id)
+        _queue_id = os.path.join(self.queue_path, job.id)
+
+        # Remove job from scheduler queue if it was queued
+        if os.path.exists(_queue_id):
+            try:
+                os.unlink(_queue_id)
+            except:
+                logger.error("@Scheduler - Unable to remove job scheduler ID "
+                             "file %s" % _queue_id, exc_info=True)
 
         # Remove output dir if it exists.
         if os.path.isdir(_out_dir):
@@ -718,6 +768,10 @@ class Scheduler(object):
         else:
             logger.info("Job %s cleaned." % job.id)
 
+        # Update service quota
+        self.jm.services[job.service].update_job(job)
+        # Reduce memory footprint
+        job.compact()
         # Set job exit state
         job.exit()
 
@@ -936,16 +990,17 @@ class PbsScheduler(Scheduler):
             # Submit
             logger.debug("@PBS - Submitting new job")
             # Run qsub with proper user permissions
-            _user = job.service.config['username']
+            _user = self.jm.services[job.service].config['username']
             _comm = "/usr/bin/qsub -q %s -d %s -j oe -o %s " \
                     "-l epilogue=epilogue.sh %s" % \
                     (_queue, _work_dir, _output_log, _run_script)
             _opts = ["/bin/su", "-c", _comm, _user]
-            logger.debug("@PBS - Running command: %s" % str(_opts))
+            verbose("@PBS - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-            _output = _proc.communicate()
+            _output = _proc.communicate()[0]
+            verbose(_output)
             # Hopefully qsub returned meaningful job ID
-            _jid = _output[0]
+            _jid = _output.strip()
             # Check return code. If qsub was not killed by signal Popen will
             # not rise an exception
             if _proc.returncode != 0:
@@ -984,8 +1039,10 @@ class PbsScheduler(Scheduler):
                 # Run qstat
                 logger.debug("@PBS - Check jobs state for user %s" % _usr)
                 _opts = ["/usr/bin/qstat", "-f", "-x", "-u", _usr]
+                verbose("@PBS - Running command: %s" % str(_opts))
                 _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
                 _output = _proc.communicate()[0]
+                verbose(_output)
                 # Check return code. If qstat was not killed by signal Popen
                 # will not rise an exception
                 if _proc.returncode != 0:
@@ -1087,10 +1144,12 @@ class PbsScheduler(Scheduler):
         try:
             logger.debug("@PBS - Killing job")
             # Run qdel with proper user permissions
-            _user = job.service.config['username']
+            _user = self.jm.services[job.service].config['username']
             _opts = ["/bin/su", "-c", "/usr/bin/qdel %s" % _pbs_id, _user]
+            verbose("@PBS - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()[0]
+            verbose(_output)
             # Check return code. If qstat was not killed by signal Popen will
             # not rise an exception
             if _proc.returncode != 0:
@@ -1159,18 +1218,19 @@ class SshScheduler(Scheduler):
             # Submit
             logger.debug("@SSH - Submitting new job")
             # Run qsub with proper user permissions
-            _user = job.service.config['username']
+            _user = self.jm.services[job.service].config['username']
             _shsub = os.path.join(os.path.dirname(conf.daemon_path_installdir),
                                   "Scripts")
             _shsub = os.path.join(_shsub, "shsub")
             _comm = "%s -i %s -d %s -o %s %s" % \
                     (_shsub, job.id, _work_dir, _output_log, _run_script)
-            _opts = ["/usr/bin/ssh", "-l", _user, _queue, _comm]
-            logger.debug("@SSH - Running command: %s" % str(_opts))
+            _opts = ["/usr/bin/ssh", "-x", "-l", _user, _queue, _comm]
+            verbose("@SSH - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-            _output = _proc.communicate()
+            _output = _proc.communicate()[0]
+            verbose(_output)
             # Hopefully shsub returned meaningful job ID
-            _jid = _output[0]
+            _jid = _output.strip()
             # Check return code. If ssh was not killed by signal Popen will
             # not rise an exception
             if _proc.returncode != 0:
@@ -1198,7 +1258,7 @@ class SshScheduler(Scheduler):
         # Extract list of user names and queues associated to the jobs
         _users = {}
         for _job in jobs:
-            _service = _job.service
+            _service = self.jm.services[_job.service]
             _usr = _service.config['username']
             if _usr not in _users.keys():
                 _users[_usr] = []
@@ -1215,16 +1275,18 @@ class SshScheduler(Scheduler):
             for _queue in _queues:
                 try:
                     # Run qstat
-                    logger.debug("@SSH - Check jobs state for user %s @ "
-                                 "host %s" % (_usr, _queue))
+                    logger.debug("@SSH - Check jobs state for user %s @ %s" %
+                                 (_usr, _queue))
                     _shstat = os.path.join(
                         os.path.dirname(conf.daemon_path_installdir),
                         "Scripts"
                     )
                     _shstat = os.path.join(_shstat, "shstat")
-                    _opts = ["/usr/bin/ssh", "-l", _usr, _queue, _shstat]
+                    _opts = ["/usr/bin/ssh", "-x", "-l", _usr, _queue, _shstat]
+                    verbose("@SSH - Running command: %s" % str(_opts))
                     _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
                     _output = _proc.communicate()[0]
+                    verbose(_output)
                     # Check return code. If ssh was not killed by signal Popen
                     # will not rise an exception
                     if _proc.returncode != 0:
@@ -1239,8 +1301,13 @@ class SshScheduler(Scheduler):
                     return
 
                 for _line in _output.splitlines():
-                    _jid, _state = _line.split(" ")
-                    _job_states[_jid] = _state
+                    try:
+                        _jid, _state = _line.split(" ")
+                        _job_states[_jid] = _state
+                    except:
+                        logger.error("@SSH - Unable to parse shstat output.",
+                                     exc_info=True)
+                        return
 
         # Iterate through jobs
         for _job in jobs:
@@ -1314,7 +1381,7 @@ class SshScheduler(Scheduler):
         try:
             logger.debug("@SSH - Killing job")
             # Run qdel with proper user permissions
-            _usr = job.service.config['username']
+            _usr = self.jm.services[job.service].config['username']
             _queue = self.default_queue
             if job.valid_data['CIS_SSH_HOST'] != "":
                 _queue = job.valid_data['CIS_SSH_HOST']
@@ -1323,9 +1390,11 @@ class SshScheduler(Scheduler):
                 "Scripts"
             )
             _shdel = os.path.join(_shdel, "shdel")
-            _opts = ["/usr/bin/ssh", "-l", _usr, _queue, _shdel, _pid]
+            _opts = ["/usr/bin/ssh", "-x", "-l", _usr, _queue, _shdel, _pid]
+            verbose("@SSH - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()[0]
+            verbose(_output)
             # Check return code. If ssh was not killed by signal Popen will
             # not rise an exception
             if _proc.returncode != 0:

@@ -65,6 +65,8 @@ class Config(dict):
         self.config_progress_step = 2
         #: Timeout for job cleanup before forcing shutdown
         self.config_shutdown_time = 2
+        #: Enabled schedulers
+        self.config_schedulers = ('pbs', 'ssh')
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
@@ -150,7 +152,9 @@ class Config(dict):
         #: Allowed sections in job submission JSON
         self.service_allowed_sections = ('service', 'api', 'input', 'chain')
         #: Reserved key names for job parameters
-        self.service_reserved_keys = ('CIS_SCHEDULER', 'CIS_QUEUE')
+        self.service_reserved_keys = (
+            'CIS_SCHEDULER', 'CIS_QUEUE', 'CIS_SSH_HOST'
+        )
         #: Default user name for job execution
         self.service_username = 'apprunner'
         #: Default job minimum lifetime in hours (supports fractions). Jobs

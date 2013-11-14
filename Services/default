@@ -3,13 +3,18 @@
     "variables" : {
         "CIS_SCHEDULER" : {
             "type" : "string",
-            "default" : "pbs",
-            "values" : ["pbs"]
+            "default" : "ssh",
+            "values" : ["pbs", "ssh"]
         },
         "CIS_QUEUE" : {
             "type" : "string",
             "default" : "test_slc6",
             "values" : ["short", "long", "test_slc6"]
+        },
+        "CIS_SSH_HOST" : {
+            "type" : "string",
+            "default" : "localhost",
+            "values" : ["localhost"]
         }
     },
     "sets" : {}

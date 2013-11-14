@@ -4,19 +4,20 @@
 BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
 usage() {
-    echo "Usage: shsub [-h] -i ID -o OUT command [args]"
+    echo "Usage: shsub [-h] -i ID -o OUT [-d DIR] command [args]"
     echo ""
     echo "Run a command in background. Outpus the PID of child process."
     echo " -h      : display this message"
     echo " -i ID   : job id"
     echo " -o OUT  : name of the output log file"
+    echo " -d DIR  : Working directory"
     echo " command : the command to execute"
     echo " args    : command argument list"
     exit 1
 }
 
 # Option parser
-while getopts i:o:h OPT
+while getopts i:o:d:h OPT
 do
     case $OPT in
         (i)
@@ -24,6 +25,9 @@ do
             ;;
         (o)
             OUT=$OPTARG
+            ;;
+        (d)
+            WORKDIR=$OPTARG
             ;;
         (h | ?)
             usage
@@ -64,9 +68,13 @@ mkdir -p $DIR
 rm -f $PIPE
 mkfifo $PIPE
 
+if [ -n "$WORKDIR" ]
+then
+    WORKDIR="-d $WORKDIR"
+fi
 # Execute command using shrun in screen session. Make sure screen is detached
 # from the terminal.
-screen -d -m -S $ID /bin/sh -c "$BASEDIR/shrun -i $ID -o $OUT $*"
+screen -d -m -S $ID /bin/sh -c "$BASEDIR/shrun -i $ID -o $OUT $WORKDIR $*"
 
 # Read child PID and store it in a file
 PID=$(cat $PIPE)

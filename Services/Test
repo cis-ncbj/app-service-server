@@ -4,7 +4,7 @@
         // Sleep interval
         "SLEEP" : {
             "type" : "int",
-            "default" : 3,
+            "default" : 1,
             "values" : [1,30]
         },
         // Nominator
