@@ -3,7 +3,7 @@
     "variables" : {
         "CIS_SCHEDULER" : {
             "type" : "string",
-            "default" : "ssh",
+            "default" : "pbs",
             "values" : ["pbs", "ssh"]
         },
         "CIS_QUEUE" : {
