@@ -65,12 +65,17 @@ class Config(dict):
         self.config_progress_step = 2
         #: Timeout for job cleanup before forcing shutdown
         self.config_shutdown_time = 2
+        #: Enabled schedulers
+        self.config_schedulers = ('pbs', 'ssh')
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
         self.daemon_pidfile_timeout = -1
         #: Working directory of daemon
         self.daemon_path_workdir = os.getcwd()
+        #: AppServer install directory
+        self.daemon_path_installdir = \
+            os.path.dirname(os.path.realpath(__file__))
         self.log_level = 'INFO'  #: Logging level
         self.log_output = '/tmp/CISAppServer.log'  #: Log output file name
         self.log_level_cli = None  #: Logging level CLI override
@@ -124,6 +129,16 @@ class Config(dict):
         self.pbs_path_work = 'PBS/Scratch'
         self.pbs_default_queue = 'short'  #: Name of default PBS queue
         self.pbs_max_jobs = 100  #: Maximum number of concurent PBS jobs
+        #: Path where SSH backend will store job IDs
+        self.ssh_path_queue = 'SSH/Queue'
+        #: Path where SSH backeng will create job working directories
+        self.ssh_path_work = 'SSH/Scratch'
+        #: Name of default SSH execution host
+        self.ssh_default_queue = 'localhost'
+        #: Maximum number of concurent jobs per SSH execution host
+        self.ssh_max_jobs = {
+            'localhost': 2
+        }
         #: Path with services configuration files
         self.service_path_conf = 'Services'
         #: Path with services scripts and input files
@@ -137,7 +152,9 @@ class Config(dict):
         #: Allowed sections in job submission JSON
         self.service_allowed_sections = ('service', 'api', 'input', 'chain')
         #: Reserved key names for job parameters
-        self.service_reserved_keys = ('CIS_SCHEDULER', 'CIS_QUEUE')
+        self.service_reserved_keys = (
+            'CIS_SCHEDULER', 'CIS_QUEUE', 'CIS_SSH_HOST'
+        )
         #: Default user name for job execution
         self.service_username = 'apprunner'
         #: Default job minimum lifetime in hours (supports fractions). Jobs
@@ -293,6 +310,8 @@ class Config(dict):
             "daemon_path_workdir",
             "pbs_path_queue",
             "pbs_path_work",
+            "ssh_path_queue",
+            "ssh_path_work",
             "gate_path_shared",
             "gate_path_output",
             "gate_path_dump",

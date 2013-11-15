@@ -1,0 +1,79 @@
+#!/bin/bash -e
+
+usage() {
+    echo "Usage: shsub [-h]"
+    echo ""
+    echo "Check the state of submitted jobs. Outputs one job per line."
+    echo "PID STATE"
+    echo "PID   : job process ID"
+    echo "STATE:"
+    echo " -1 : job is running"
+    echo " -2 : job exit code is missing"
+    echo " N  : job has finished with exit code N"
+    echo ""
+    echo "Opts:"
+    echo " -h      : display this message"
+    exit 1
+}
+
+# Option parser
+while getopts h OPT
+do
+    case $OPT in
+        (h)
+            usage
+            ;;
+    esac
+done
+
+# Remove parsed args
+N=1
+while [[ $N < $OPTIND ]]
+do
+    shift
+    let N+=1
+done
+
+# Job states are stored in DIR folder
+# The PIDs are stored in *.id files
+# The exit codes are stored in *.dat files
+DIR=/tmp/$USER/shpool
+# PID file pattern - do not expand * here
+PATTERN=$DIR'/*.id'
+
+if [ ! -d $DIR ]
+then
+    mkdir -p $DIR
+fi
+
+# Loop over PID files. Do not put PATTERN inside quotes so that * is expanded
+for ID in $PATTERN
+do
+    # If no *.id files are found the ID is equal to PATTERN
+    if [ "$ID" == "$PATTERN" ]
+    then
+        exit 0
+    fi
+
+    # Get the process pid and check that it is present in system proc table
+    PID=$(cat $ID)
+    if [ -d /proc/$PID ]
+    then
+        # Process is running
+        echo "$PID -1"
+    else
+        # Check that .dat file exists
+        STATE=$(echo $ID | sed 's/\.id/\.dat/')
+        if [ -f $STATE ]
+        then
+            # Return job exit state
+            echo "$PID $(cat $STATE)"
+        else
+            # No .dat file present - something went wrong
+            echo "$PID -2"
+        fi
+        # Remove info about finished processes
+        rm -f $ID
+        rm -f $STATE
+    fi
+done

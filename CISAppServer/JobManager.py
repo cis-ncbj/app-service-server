@@ -177,7 +177,7 @@ class Job(object):
         Mark job as killed by user.
 
         :param message: that will be passed to user,
-        :param exit_code: that will be set for this job.
+        :param exit_code: one of :py:class:`ExitCodes`.
         """
         # Mark as killed makes sense only for unfinished jobs
         if self.get_state() not in ['waiting', 'queued', 'running']:
@@ -196,7 +196,7 @@ class Job(object):
         :param message: that will be passed to user,
         :param state: Job state after cleanup will finish. One of:
             ['done', 'failed', 'aborted', 'killed'],
-        :param exit_code: that will be set for this job.
+            :param exit_code: one of :py:class:`ExitCodes`.
         """
         self.__set_exit_state(message, state, exit_code)
         self.__set_state("closing")
@@ -209,6 +209,7 @@ class Job(object):
         job state as *closing*. After cleanup the job state will be *aborted*.
 
         :param message: Message to be passed to logs and client,
+        :param exit_code: One of :py:class:`ExitCodes`,
         :param err: if True use log as ERROR otherwise use WARNING priority,
         :param exc_info: if True logging will extract current exception info
             (use in except block to provide additional information to the
@@ -230,7 +231,7 @@ class Job(object):
     def exit(self):
         """
         Finalise job cleanup by setting the state and passing the exit message
-        to the user.  Should be called only after Job.finish() method was
+        to the user. Should be called only after Job.finish() method was
         called.
         """
 
@@ -258,19 +259,25 @@ class Job(object):
         self.__size = 0
 
         # Only consider job states that could have an output dir
-        if self.__state not in ('done', 'failed', 'killed', 'abort'):
+        if self.__state not in \
+           ('cleanup', 'done', 'failed', 'killed', 'abort'):
             return
 
         try:
             # Check that output dir exists
             _name = os.path.join(conf.gate_path_output, self.id)
             if not os.path.exists(_name):
+                self.__size = 0
+                T.verbose("@Job - Job output size calculated: %s" %
+                          self.__size)
                 return
 
             # Use /usr/bin/du as os.walk is very slow
             _opts = [u'/usr/bin/du', u'-sb', _name]
+            T.verbose("@Job - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()
+            T.verbose(_output)
             # Hopefully du returned meaningful result
             _size = _output[0].split()[0]
             # Check return code. If du was not killed by signal Popen will
@@ -289,7 +296,7 @@ class Job(object):
             return
 
         self.__size = int(_size)
-        logger.debug("@Job - Job output size calculated: %s" % self.__size)
+        T.verbose("@Job - Job output size calculated: %s" % self.__size)
 
     def compact(self):
         """
@@ -333,10 +340,11 @@ class Job(object):
         :param new_state: new sate for the job. For valid states see
             :py:meth:`get_state`.
         """
-        logger.debug("@Job - Set new state: %s" % new_state)
+        logger.debug("@Job - Set new state: %s (%s)" % (new_state, self.id))
 
         if new_state not in conf.service_states:
-            raise Exception('Unknown job state %s.' % new_state)
+            raise Exception("Unknown job state %s (%s)." %
+                            (new_state, self.id))
 
         self.get_state()  # TODO - check_state ???
 
@@ -359,6 +367,14 @@ class Job(object):
         self.__state = new_state
 
     def __set_exit_state(self, message, state, exit_code):
+        """
+        Set job "exit state" - the state that job will be put into after it is
+        finalised.
+
+        :param message: - Message that will be passed to the user,
+        :param state: - Job state, one of: done, failed, aborted, killed,
+        :param exit_code: - One of :py:class:`ExitCodes`.
+        """
         # Valid output states
         _states = ('done', 'failed', 'aborted', 'killed')
 
@@ -370,30 +386,30 @@ class Job(object):
         _message = "%s:%s %s\n" % \
             (_prefix, exit_code, message)
 
-        # Concatanate all status messages
-        self.__exit_message += _message
         # Do not overwrite aborted or killed states
         if self.__exit_state != 'aborted':
             if self.__exit_state != 'killed' or state == 'aborted':
                 self.__exit_state = state
                 self.__exit_code = exit_code
+                # Concatanate all status messages
+                self.__exit_message += _message
 
-        # Store the exit info into a .opt file
-        _opt = os.path.join(conf.gate_path_opts, self.id)
-        try:
-            with open(_opt, 'w') as _f:
-                _data = {
-                    "exit_state": self.__exit_state,
-                    "exit_code": self.__exit_code,
-                    "exit_message": self.__exit_message
-                }
-                json.dump(_data, _f)
-        except:
-            if self.__exit_state != 'aborted':
-                raise
-            else:
-                logger.error('@Job - Unable to store job internal state',
-                             exc_info=True)
+                # Store the exit info into a .opt file
+                _opt = os.path.join(conf.gate_path_opts, self.id)
+                try:
+                    with open(_opt, 'w') as _f:
+                        _data = {
+                            "exit_state": self.__exit_state,
+                            "exit_code": self.__exit_code,
+                            "exit_message": self.__exit_message
+                        }
+                        json.dump(_data, _f)
+                except:
+                    if self.__exit_state != 'aborted':
+                        raise
+                    else:
+                        logger.error('@Job - Unable to store job internal'
+                                     'state', exc_info=True)
 
 
 class JobManager(object):
@@ -416,9 +432,12 @@ class JobManager(object):
         """
         # Initialize Validator and PbsManager
         self.validator = T.Validator(self)  #: Validator instance
-        self.schedulers = {  #: Scheduler interface instances
-            'pbs': T.PbsScheduler(self)
-        }
+        self.schedulers = {}  #: Scheduler interface instances
+        for _scheduler in conf.config_schedulers:
+            if _scheduler == 'pbs':
+                self.schedulers[_scheduler] = T.PbsScheduler(self)
+            elif _scheduler == 'ssh':
+                self.schedulers[_scheduler] = T.SshScheduler(self)
         self.services = self.validator.services
 
         # Job list
@@ -587,7 +606,7 @@ class JobManager(object):
                 _queue = os.listdir(_scheduler.queue_path)
             except:
                 logger.error(
-                    "@jmanager - unable to read %s queue directory %s." %
+                    "@JManager - unable to read %s queue directory %s." %
                     (_sname, _scheduler.queue_path),
                     exc_info=True
                 )
@@ -667,16 +686,18 @@ class JobManager(object):
             _scheduler = self.schedulers[_job.valid_data['CIS_SCHEDULER']]
             # Run cleanup in separate threads
             try:
+                # Mark job as in cleanup state
+                _job.cleanup()
                 if _job.get_exit_state() == 'aborted':
                     _thread = threading.Thread(
-                        target=_scheduler.abort, args=(_job))
+                        target=_scheduler.abort, args=(_job,))
                     _thread.start()
                     self.__thread_list.append(_thread)
                     logger.debug("@JManager - Abort cleanup thread started "
                                  "for job %s" % _job.id)
                 else:
                     _thread = threading.Thread(
-                        target=_scheduler.finalise, args=(_job))
+                        target=_scheduler.finalise, args=(_job,))
                     _thread.start()
                     self.__thread_list.append(_thread)
                     logger.debug("@JManager - Finalise cleanup thread started "
@@ -856,9 +877,9 @@ class JobManager(object):
 
         # Remove finished threads
         for _thread in self.__thread_list:
-            if not _thread.isActive():
+            if not _thread.is_alive():
                 _thread.join()
-                del _thread
+                self.__thread_list.remove(_thread)
                 logger.debug("@JManager - Removed finished cleanup thread.")
 
     def collect_garbage(self, service, full=False):
