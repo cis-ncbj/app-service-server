@@ -13,10 +13,20 @@ try:
 except:
     import simplejson as json
 
+logger = logging.getLogger(__name__)
+
+
 VERBOSE = 5
 
 
-logger = logging.getLogger(__name__)
+def verbose(msg, exc_info=False):
+    """
+    Log message with VERBOSE log level.
+
+    VERBOSE log level is higher than DEBUG and should be used for large debug
+    messages, e.g. data dumps, output from subprocesses, etc.
+    """
+    logger.log(VERBOSE, msg, exc_info=exc_info)
 
 
 class ExitCodes:

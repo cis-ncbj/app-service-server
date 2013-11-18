@@ -22,7 +22,8 @@ import logging
 from subprocess import Popen, PIPE, STDOUT
 from yapsy.PluginManager import PluginManager
 
-from Config import conf, VERBOSE, ExitCodes
+from Config import conf, verbose, ExitCodes
+from DataStore import Service, ServiceStore, JobStore
 
 logger = logging.getLogger(__name__)
 
@@ -32,16 +33,6 @@ def rmtree_error(function, path, exc_info):
 
     logger.error("@rmtree - Cannot remove job output: %s %s" %
                  (function, path), exc_info=exc_info)
-
-
-def verbose(msg, exc_info=False):
-    """
-    Log message with VERBOSE log level.
-
-    VERBOSE log level is higher than DEBUG and should be used for large debug
-    messages, e.g. data dumps, output from subprocesses, etc.
-    """
-    logger.log(VERBOSE, msg, exc_info=exc_info)
 
 
 class CTemplate(string.Template):
@@ -54,141 +45,13 @@ class CTemplate(string.Template):
     idpattern = '[_a-z0-9]+'
 
 
-class Service(dict):
-    """
-    Class implementing a Service.
-
-    Stores Service configuration and monitors its state.
-
-    """
-    def __init__(self, name, data, *args, **kwargs):
-        """Service C-tor
-
-        :param name: The name of the service.
-        :param data: Dict with service config read from JSON data file.
-        Other arguments are passed to dict parent class.
-        """
-        # Service is a dict. Make all the keys accessible as attributes while
-        # retaining the dict API
-        super(Service, self).__init__(*args, **kwargs)
-        self.__dict__ = self
-
-        #: Service name
-        self.name = name
-        #: Configuration options affecting service handling - like allowed
-        #: diskspace and garbage collection
-        self.config = {
-            'min_lifetime': conf.service_min_lifetime,
-            'max_lifetime': conf.service_max_lifetime,
-            'max_runtime': conf.service_max_runtime,
-            'max_jobs': conf.service_max_jobs,
-            'quota': conf.service_quota,
-            'job_size': conf.service_job_size,
-            'username': conf.service_username
-        }
-        # Load settings from config file
-        self.config.update(data['config'])
-        #: Definitions of allowed variables
-        self.variables = data['variables']
-        #: Definitions of allowed variable sets
-        self.sets = data['sets']
-        #: Real space usage by service output files
-        self.real_size = 0
-        #: Projection of space usage by service output files
-        self.current_size = 0
-        # List of current job proxies. Job proxies are used to calculate
-        # current service quota. Will be removed by the garbage collector to
-        # indicate change in quota due to jobs scheduled for removal (but not
-        # yet renmoved physically)
-        self.__job_proxies = []
-        self.__jobs = []  # List of current jobs with known size
-
-        # Covert quota and job_size to bytes from MB
-        self.config['quota'] = self.config['quota'] * 1000000
-        self.config['job_size'] = self.config['job_size'] * 1000000
-
-    def add_job_proxy(self, job):
-        """
-        Add new job proxy. The current service quota usage will increase by the
-        amount defined in service config by job_size variable.
-
-        :param job: :py:class:`Job` instance
-        """
-        if job.id in self.__job_proxies:
-            logger.error("@Service - Job proxy already exists: %s" % job.id)
-            return
-
-        self.current_size += self.config['job_size']
-        self.__job_proxies.append(job.id)
-        verbose("@Service - Allocated %s MB for job proxy (%s)." %
-                ((self.config['job_size']/1000000), self.name))
-
-    def remove_job_proxy(self, job):
-        """
-        Remove a job proxy. The current service quota usage will decrease by
-        the job size. Job size should have been determined by the update_job
-        call.
-
-        :param job: :py:class:`Job` instance
-        """
-        if job.id in self.__job_proxies:
-            self.__job_proxies.remove(job.id)
-            self.current_size -= job.get_size()
-
-        verbose("@Service - Reclaimed %s MB of storage from soft "
-                "quota (%s)." % ((job.get_size()/1000000), self.name))
-
-    def update_job(self, job):
-        """
-        Calculate the current size of the output files of the job. Adjusts
-        usage of the current and real quotas for the service.
-
-        :param job: :py:class:`Job` instance
-        """
-        _change = 0
-        if job.id in self.__jobs:
-            _change -= job.get_size()
-            self.current_size -= job.get_size()
-            self.real_size -= job.get_size()
-        else:
-            self.__jobs.append(job.id)
-            if job.id in self.__job_proxies:
-                _change -= self.config['job_size']
-                self.current_size -= self.config['job_size']
-            else:
-                self.__job_proxies.append(job.id)
-        job.calculate_size()
-        _change += job.get_size()
-        self.current_size += job.get_size()
-        self.real_size += job.get_size()
-        verbose("@Service - Storage usage adjusted by %s MB (%s)." %
-                ((_change/1000000), self.name))
-
-    def remove_job(self, job):
-        """
-        Remove the job and its proxy. Adjust the usage of the service quota.
-
-        :param job: :py:class:`Job` instance
-        """
-        if job.id not in self.__jobs:
-            logger.error("@Service - Job does not exist: %s" % job.id)
-            return
-        if job.id in self.__job_proxies:
-            self.__job_proxies.remove(job.id)
-            self.current_size -= job.get_size()
-        self.__jobs.remove(job.id)
-        self.real_size -= job.get_size()
-        verbose("@Service - Reclaimed %s MB of storage (%s)." %
-                ((job.get_size()/1000000), self.name))
-
-
 class Validator(object):
     """
     Class responsible for validation of job input data.
     It is also responsible for preparation of PBS scripts.
     """
 
-    def __init__(self, jm):
+    def __init__(self):
         """
         Upon initialisation load services configuration.
         """
@@ -197,10 +60,6 @@ class Validator(object):
         self.api_min = 1.0
         #: Max API level
         self.api_max = 1.0
-        #: Services configurations
-        self.services = {}
-        #: JobManager instance
-        self.jm = jm
         #: Current job instance
         self.job = None
         #: PluginManager instance
@@ -220,7 +79,7 @@ class Validator(object):
                 continue
             with open(_file_name) as _f:
                 _data = conf.json_load(_f)
-            self.services[_service] = Service(_service, _data)
+            ServiceStore[_service] = Service(_service, _data)
 
             # Plugin
             if 'plugin' in _data['config']:
@@ -229,7 +88,7 @@ class Validator(object):
                 _plugins.append(_plugin_dir)
 
             logger.info("Initialized service: %s" % _service)
-        verbose(json.dumps(self.services))
+        verbose(json.dumps(ServiceStore))
 
         # Load plugins
         self.pm.setPluginPlaces(_plugins)
@@ -262,7 +121,7 @@ class Validator(object):
         # Check if data contains service attribute and that such service was
         # initialized
         if 'service' not in _data.keys() or \
-           _data['service'] not in self.services.keys() or \
+           _data['service'] not in ServiceStore.keys() or \
            _data['service'] == 'default':
             job.die("@Validator - Not supported service: %s." %
                     _data['service'], err=False,
@@ -297,7 +156,7 @@ class Validator(object):
                 return False
 
         job.service = _data['service']
-        _service = self.services[_data['service']]
+        _service = ServiceStore[_data['service']]
 
         # Load defaults
         _variables = {
@@ -306,7 +165,7 @@ class Validator(object):
         }
         _variables.update({
             _k: _v['default'] for _k, _v in
-            self.services['default'].variables.items()
+            ServiceStore['default'].variables.items()
         })
 
         # Load sets
@@ -369,7 +228,7 @@ class Validator(object):
             # Check for possible reserved attribuet names like service, name,
             # date
             elif _k in conf.service_reserved_keys:
-                if not self.validate_value(_k, _v, self.services['default']):
+                if not self.validate_value(_k, _v, ServiceStore['default']):
                     job.die(
                         "@Validator - Variable value not allowed: %s - %s." %
                         (_k, _v), err=False, exit_code=ExitCodes.Validate
@@ -628,7 +487,7 @@ class Validator(object):
     def validate_chain(self, chain):
         for _id in chain:
             # ID of type string check if it is listed among finished jobs
-            if not _id in self.jm.get_job_ids('done'):
+            if not _id in JobStore.get_job_ids('done'):
                 logger.warning(
                     "@Validator - Job %s did not finish or does not exist. "
                     "Unable to chain output." %
@@ -650,7 +509,7 @@ class Scheduler(object):
     # burden lets do it every n-th step
     __progress_step = 0
 
-    def __init__(self, jm):
+    def __init__(self):
         #: Working directory path
         self.work_path = None
         #: Path where submitted job IDs are stored
@@ -659,8 +518,6 @@ class Scheduler(object):
         self.default_queue = None
         #: Maximum number of concurent jobs
         self.max_jobs = None
-        #: JobManager instance
-        self.jm = jm
 
     def submit(self, job):
         """
@@ -763,7 +620,7 @@ class Scheduler(object):
             return
 
         # Update service quota
-        self.jm.services[job.service].update_job(job)
+        ServiceStore[job.service].update_job(job)
         # Reduce memory footprint
         job.compact()
         # Set job exit state
@@ -811,7 +668,7 @@ class Scheduler(object):
             logger.info("Job %s cleaned." % job.id)
 
         # Update service quota
-        self.jm.services[job.service].update_job(job)
+        ServiceStore[job.service].update_job(job)
         # Reduce memory footprint
         job.compact()
         # Set job exit state
@@ -989,8 +846,8 @@ class PbsScheduler(Scheduler):
     Allows for job submission, deletion and extraction of job status.
     """
 
-    def __init__(self, jm):
-        super(PbsScheduler, self).__init__(jm)
+    def __init__(self):
+        super(PbsScheduler, self).__init__()
         #: PBS Working directory path
         self.work_path = conf.pbs_path_work
         #: Path where submitted PBS job IDs are stored
@@ -1032,7 +889,7 @@ class PbsScheduler(Scheduler):
             # Submit
             logger.debug("@PBS - Submitting new job")
             # Run qsub with proper user permissions
-            _user = self.jm.services[job.service].config['username']
+            _user = ServiceStore[job.service].config['username']
             _comm = "/usr/bin/qsub -q %s -d %s -j oe -o %s " \
                     "-l epilogue=epilogue.sh %s" % \
                     (_queue, _work_dir, _output_log, _run_script)
@@ -1069,7 +926,7 @@ class PbsScheduler(Scheduler):
         """
         # Extract list of user names associated to the jobs
         _users = []
-        for _service in self.jm.services.values():
+        for _service in ServiceStore.values():
             if _service.config['username'] not in _users:
                 _users.append(_service.config['username'])
 
@@ -1193,7 +1050,7 @@ class PbsScheduler(Scheduler):
         try:
             logger.debug("@PBS - Killing job")
             # Run qdel with proper user permissions
-            _user = self.jm.services[job.service].config['username']
+            _user = ServiceStore[job.service].config['username']
             _opts = ['/usr/bin/ssh', '-l', _user, 'localhost',
                      "/usr/bin/qdel %s" % _pbs_id]
             verbose("@PBS - Running command: %s" % str(_opts))
@@ -1224,8 +1081,8 @@ class SshScheduler(Scheduler):
     Allows for job submission, deletion and extraction of job status.
     """
 
-    def __init__(self, jm):
-        super(SshScheduler, self).__init__(jm)
+    def __init__(self):
+        super(SshScheduler, self).__init__()
         #: SSH Working directory path
         self.work_path = conf.ssh_path_work
         #: Path where submitted SSH job IDs are stored
@@ -1268,7 +1125,7 @@ class SshScheduler(Scheduler):
             # Submit
             logger.debug("@SSH - Submitting new job")
             # Run qsub with proper user permissions
-            _user = self.jm.services[job.service].config['username']
+            _user = ServiceStore[job.service].config['username']
             _shsub = os.path.join(os.path.dirname(conf.daemon_path_installdir),
                                   "Scripts")
             _shsub = os.path.join(_shsub, "shsub")
@@ -1308,7 +1165,7 @@ class SshScheduler(Scheduler):
         # Extract list of user names and queues associated to the jobs
         _users = {}
         for _job in jobs:
-            _service = self.jm.services[_job.service]
+            _service = ServiceStore[_job.service]
             _usr = _service.config['username']
             if _usr not in _users.keys():
                 _users[_usr] = []
@@ -1431,7 +1288,7 @@ class SshScheduler(Scheduler):
         try:
             logger.debug("@SSH - Killing job")
             # Run qdel with proper user permissions
-            _usr = self.jm.services[job.service].config['username']
+            _usr = ServiceStore[job.service].config['username']
             _queue = self.default_queue
             if job.valid_data['CIS_SSH_HOST'] != "":
                 _queue = job.valid_data['CIS_SSH_HOST']

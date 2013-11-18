@@ -36,8 +36,7 @@ from logging import \
     debug, info
 
 from .JobManager import JobManager, version
-from .Config import conf
-from . import Tools as T
+from .Config import conf, VERBOSE
 
 logger = logging.getLogger(__name__)
 
@@ -163,8 +162,8 @@ class DaemonRunner(object):
             _log_level_name = 'INFO'
         conf.log_output_cli = _args.log_output  #: Log output file name
 
-        logging.VERBOSE = T.VERBOSE
-        logging.addLevelName(T.VERBOSE, 'VERBOSE')
+        logging.VERBOSE = VERBOSE
+        logging.addLevelName(VERBOSE, 'VERBOSE')
         _log_level = getattr(logging, _log_level_name)
         logging.basicConfig(
             level=_log_level,
