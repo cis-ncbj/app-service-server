@@ -1097,8 +1097,15 @@ class PbsScheduler(Scheduler):
                 if _state[0] == 'C':
                     _new_state = 'done'
                     _msg = 'Job finished succesfully'
-                    _exit_code = int(_state[1])
-                    if _exit_code is None or _exit_code > 256:
+
+                    _exit_code = _state[1]
+                    if _exit_code is None:
+                        _new_state = 'killed'
+                        _msg = 'Job was killed by the scheduler'
+                        _exit_code = ExitCodes.SchedulerKill
+
+                    _exit_code = int(_exit_code)
+                    if _exit_code > 256:
                         _new_state = 'killed'
                         _msg = 'Job was killed by the scheduler'
                     elif _exit_code > 128:
