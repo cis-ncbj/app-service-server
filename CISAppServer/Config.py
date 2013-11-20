@@ -82,6 +82,8 @@ class Config(dict):
         self.log_output = '/tmp/CISAppServer.log'  #: Log output file name
         self.log_level_cli = None  #: Logging level CLI override
         self.log_output_cli = None  #: Log output file name CLI override
+        #: Email to send the error messages
+        self.log_email = ""
         #: Configuration of logging module
         self.log_config = {
             'version': 1,
@@ -108,7 +110,7 @@ class Config(dict):
                     'formatter': 'verbose',
                     'mailhost': 'localhost',
                     'fromaddr': 'kklimaszewski@cis.gov.pl',
-                    'toaddrs': 'konrad.klimaszewski@gazeta.pl',
+                    'toaddrs': self.log_email,
                     'subject': 'AppServer Error',
                 },
                 'file': {
@@ -265,6 +267,11 @@ class Config(dict):
            'file' in self.log_config['handlers'].keys():
             self.log_config['handlers']['file']['filename'] = \
                 self.log_output
+        if not self.log_email:
+            del self.log_config['handlers']['mail']
+            self.log_config['root']['handlers'].remove('mail')
+        else:
+            self.log_config['handlers']['mail']['toaddrs'] = self.log_email
 
         # Normalize paths to full versions
         for _key, _value in self.items():
