@@ -16,7 +16,7 @@ from subprocess import Popen, PIPE, STDOUT
 import Tools as T
 from Config import conf, ExitCodes
 
-version = "0.3"
+version = "0.5"
 
 logger = logging.getLogger(__name__)
 
