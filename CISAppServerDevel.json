@@ -36,6 +36,9 @@
     // Log output file name (default: /tmp/CISAppServer.log)
     "log_output" : "/var/log/app-server/app-server-devel.log",
     //
+    // Send notifications about ERRORS using email
+    "log_email" : "konrad.klimaszewski@gazeta.pl"
+    //
     // ************
     // PBS settings
     // ************
