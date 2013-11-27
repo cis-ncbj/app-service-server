@@ -32,7 +32,7 @@ class ExitCodes:
     *  -94: Validate
     """
     Undefined, Abort, Shutdown, Delete, UserKill, SchedulerKill, Validate = \
-            range(-100, -93)
+        range(-100, -93)
 
 
 class Config(dict):

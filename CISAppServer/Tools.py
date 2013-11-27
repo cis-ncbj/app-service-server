@@ -990,15 +990,46 @@ class PbsScheduler(Scheduler):
             # Submit
             logger.debug("@PBS - Submitting new job")
             # Run qsub with proper user permissions
-            _user = self.jm.services[job.service].config['username']
-            _comm = "/usr/bin/qsub -q %s -d %s -j oe -o %s " \
-                    "-l epilogue=epilogue.sh %s" % \
-                    (_queue, _work_dir, _output_log, _run_script)
-            _opts = ['/usr/bin/ssh', '-l', _user, 'localhost', _comm]
+            #
+            # @TODO
+            # Implementation of dedicated users for each service
+            # - The apprunner user currently does not allow to log in via ssh
+            #  - either this limitation is lifted or the server will be run as
+            #    another user that is allowed to perform "sudo su apprunner"
+            #  - to execute sudo su a TTY is required
+            #  - this can be cirumvented using "ssh -t -t"
+            #   - A passwordless key is setup:
+            #    - .ssh/authorized_keys entry contains from="127.0.0.1" to
+            #      limit the scope of the key
+            #    - .ssh/config contains following entries to auto select the
+            #      correct key when connecting to the "local" host:
+            #     Host local
+            #         HostName 127.0.0.1
+            #         Port 22
+            #         IdentityFile ~/.ssh/id_dsa_local
+            #  - using this will generate TTY warning messages that are
+            #    suppressed only for OpenSSH 5.4 or newer. Hence the STDERR
+            #    should not be mixed with STDIN in this case
+            # - There still is a problem of file permisions:
+            #  - Data management is run with service users permisions
+            #  - Data is set to be group writable
+            #  - We use ACLs
+            # @TODO END
+            #
+            # _user = self.jm.services[job.service].config['username']
+            # _comm = "/usr/bin/qsub -q %s -d %s -j oe -o %s " \
+                    # "-l epilogue=epilogue.sh %s" % \
+                    # (_queue, _work_dir, _output_log, _run_script)
+            # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
+            # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
+            _opts = ['/usr/bin/qsub', '-q', _queue, '-d', _work_dir, '-j',
+                     'oe', '-o', _output_log, '-l', 'epilogue=epilogue.sh',
+                     _run_script]
             verbose("@PBS - Running command: %s" % str(_opts))
-            _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-            _output = _proc.communicate()[0]
-            verbose(_output)
+            _proc = Popen(_opts, stdout=PIPE, stderr=PIPE)
+            _out = _proc.communicate()
+            _output = _out[0]
+            verbose(_out)
             # Hopefully qsub returned meaningful job ID
             _jid = _output.strip()
             # Check return code. If qsub was not killed by signal Popen will
@@ -1007,7 +1038,7 @@ class PbsScheduler(Scheduler):
                 raise OSError((
                     _proc.returncode,
                     "/usr/bin/qsub returned non zero exit code.\n%s" %
-                    str(_output)
+                    str(_out)
                 ))
         except:
             job.die("@PBS - Unable to submit job %s." % job.id, exc_info=True)
@@ -1158,9 +1189,11 @@ class PbsScheduler(Scheduler):
         try:
             logger.debug("@PBS - Killing job")
             # Run qdel with proper user permissions
-            _user = self.jm.services[job.service].config['username']
-            _opts = ['/usr/bin/ssh', '-l', _user, 'localhost',
-                     "/usr/bin/qdel %s" % _pbs_id]
+            # _user = self.jm.services[job.service].config['username']
+            # _comm = "/usr/bin/qdel %s" % _pbs_id
+            # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
+            # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
+            _opts = ['/usr/bin/qdel', _pbs_id]
             verbose("@PBS - Running command: %s" % str(_opts))
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()[0]
