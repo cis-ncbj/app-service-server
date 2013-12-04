@@ -4,10 +4,11 @@
     // ***************
     //
     // Sleep interval in seconds between job status queries (dafault: 3)
-    //"config_sleep_time" : 3,
+    "config_sleep_time" : 7,
     //
     // Every n-th status query dump the progress logs (default: 2)
     //"config_progress_step" : 2,
+    "config_schedulers" : ["pbs"],
     //
     // ***************
     // Daemon settings

@@ -317,10 +317,6 @@ class Config(dict):
         # Create those paths if they do not exist
         _mkdirs = [
             "daemon_path_workdir",
-            "pbs_path_queue",
-            "pbs_path_work",
-            "ssh_path_queue",
-            "ssh_path_work",
             "gate_path_shared",
             "gate_path_output",
             "gate_path_dump",
@@ -339,6 +335,10 @@ class Config(dict):
             "gate_path_aborted",
             "gate_path_killed",
         ]
+        if 'pbs' in self.config_schedulers:
+            _mkdirs.extend(("pbs_path_queue", "pbs_path_work"))
+        if 'ssh' in self.config_schedulers:
+            _mkdirs.extend(("ssh_path_queue", "ssh_path_work"))
         for _path in _mkdirs:
             if not os.path.isdir(self[_path]):
                 self.mkdir_p(self[_path])
