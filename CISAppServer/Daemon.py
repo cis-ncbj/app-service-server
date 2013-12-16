@@ -349,6 +349,7 @@ class DaemonRunner(object):
         logger.info("Received reload command")
         logger.debug("PWD: %s" % os.getcwd())
         conf.load(conf.config_file)
+        self.job_manager.clear()
         self.job_manager.init()
         logger.info("Reload complete")
 

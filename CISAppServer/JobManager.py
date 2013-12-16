@@ -14,8 +14,8 @@ from datetime import datetime, timedelta
 import Tools as T
 
 from Config import conf, verbose, ExitCodes
-from Jobs import Job
-from DataStore import ServiceStore, JobStore
+from Jobs import Job, StateManager
+from DataStore import ServiceStore, JobStore, SchedulerStore
 
 version = "0.3"
 
@@ -42,12 +42,11 @@ class JobManager(object):
         """
         # Initialize Validator and PbsManager
         self.validator = T.Validator()  #: Validator instance
-        self.schedulers = {}  #: Scheduler interface instances
         for _scheduler in conf.config_schedulers:
             if _scheduler == 'pbs':
-                self.schedulers[_scheduler] = T.PbsScheduler()
+                SchedulerStore[_scheduler] = T.PbsScheduler()
             elif _scheduler == 'ssh':
-                self.schedulers[_scheduler] = T.SshScheduler()
+                SchedulerStore[_scheduler] = T.SshScheduler()
 
         # State of the job queue
         self.__queue_running = True
@@ -83,54 +82,11 @@ class JobManager(object):
             if _job.get_state() in ('done', 'failed', 'killed', 'aborted'):
                 _job.compact()
 
-    def get_job_ids(self, state='all'):
-        """
-        Get IDs of existing jobs.
-
-        :param state: State of the jobs to return. Valid values:
-
-        * all
-        * waiting
-        * queued
-        * running
-        * closing
-        * cleanup
-        * done
-        * failed
-        * aborted
-        * killed
-        """
-
-        _id_list = []
-        for _id in JobStore.keys():
-            if state == 'all' or state == JobStore[_id].get_state():
-                _id_list.append(_id)
-
-        return _id_list
-
-    def get_job(self, job_id, create=False):
-        """
-        Get Job object from internal list.
-
-        :param job_id: Job unique ID,
-        :param create: If job identified by *job_id* is not found in the list
-            an ERROR message is logged. When create is True a new Job object is
-            created and added to the list,
-        :return: Job object if *job_id* was found, None otherwise.
-        """
-
-        # Handle zombies
-        if job_id not in JobStore.keys():
-            if create:
-                _job = Job(job_id)
-                JobStore[job_id] = _job
-                return _job
-            else:
-                logger.error('@JManager - Job %s is missing from '
-                             'overall job list.' % job_id)
-                return None
-
-        return JobStore[job_id]
+    def clear(self):
+        ServiceStore.clear()
+        SchedulerStore.clear()
+        JobStore.clear()
+        del self.validator
 
     def check_new_jobs(self):
         """
@@ -139,40 +95,28 @@ class JobManager(object):
         If found try to submit them to selected job scheduler.
         """
 
-        # New jobs are put into the "waiting" directory
-        try:
-            _queue = os.listdir(conf.gate_path_waiting)
-        except:
-            logger.error("@JManager - Unable to read waiting queue %s" %
-                         conf.gate_path_waiting, exc_info=True)
-            return
+        verbose('@JManager - Check for new jobs.')
 
-        for _jid in _queue:
-            logger.debug('@JManager - Detected new job %s.' % _jid)
-
-            # Create new job instance. It is possible that it is already
-            # created during initialization or while checking for old jobs to
-            # remove, therefore use self.get_job.
-            _job = self.get_job(_jid, create=True)
-            if _job is None:
-                continue
+        for _job in StateManager.get_job_list("waiting", create=True).values():
+            logger.debug('@JManager - Detected new job %s.' % _job.id)
 
             if not self.validator.validate(_job):  # Validate input
                 continue
 
             _service_name = _job.service
+            _service = ServiceStore[_service_name]
             if not self.collect_garbage(_service_name):
                 if self.__w_counter_quota[_service_name] < \
                    6 * 60 * 60 / conf.config_sleep_time:
                     self.__w_counter_quota[_service_name] += 1
-                    if ServiceStore[_service_name].current_size != \
+                    if _service.current_size != \
                        self.__last_service_size[_service_name]:
                         logger.warning(
                             "@JManager - Cannot collect garbage for service: "
                             "%s" % _job.service
                         )
                         self.__last_service_size[_service_name] = \
-                            ServiceStore[_service_name].current_size
+                            _service.current_size
                 else:
                     logger.error(
                         "@JManager - Cannot collect garbage for service: %s. "
@@ -183,18 +127,18 @@ class JobManager(object):
                 continue
             else:
                 self.__last_service_size[_service_name] = \
-                    ServiceStore[_service_name].current_size
+                    _service.current_size
                 self.__w_counter_quota[_service_name] = 0
 
             try:
                 if self.submit(_job):
                     _job.queue()
-                    ServiceStore[_service_name].add_job_proxy(_job)
+                    _service.add_job_proxy(_job)
                 # Submit can return False when queue is full. Do not terminate
                 # job here so it can be resubmitted next time. If submission
                 # failed scheduler should have set job state to Aborted anyway.
             except:
-                _job.die("@JManager - Cannot start job %s." % _jid,
+                _job.die("@JManager - Cannot start job %s." % _job.id,
                          exc_info=True)
 
     def check_running_jobs(self):
@@ -204,47 +148,20 @@ class JobManager(object):
         Finished jobs will be marked for finalisation
         """
 
+        verbose('@JManager - Check state of running jobs.')
+
         # Loop over supported schedulers
-        for _sname, _scheduler in self.schedulers.items():
-            # check the "queue_path" for files with scheduler ids. this
-            # directory should only be accessible inside of the firewall so it
-            # should be safe from corruption by clients.
-            try:
-                _queue = os.listdir(_scheduler.queue_path)
-            except:
-                logger.error(
-                    "@JManager - unable to read %s queue directory %s." %
-                    (_sname, _scheduler.queue_path),
-                    exc_info=True
-                )
-                continue
-
-            _jobs = []  # Active job list
-            for _jid in _queue:
-                # Get Job object
-                _job = self.get_job(_jid)
-                # Handle zombies
-                if _job is None:
-                    logger.error(
-                        '@JManager - Job %s in %s queue is missing from '
-                        'overall job list.' % (_jid, _sname)
-                    )
-                    try:
-                        os.unlink(os.path.join(_scheduler.queue_path, _jid))
-                    except:
-                        logger.error(
-                            '@JManager - Unable to remove dangling job ID '
-                            '%s from %s queue.' % (_jid, _sname)
-                        )
-                    continue
-
+        for _sname, _scheduler in SchedulerStore.items():
+            _jobs = StateManager.get_scheduler_list(_sname)
+            _jobs_active = []
+            for _job in _jobs.values():
                 # Scheduler can change state for only running and waiting jobs.
                 # Disregard the rest.
                 _state = _job.get_state()
                 if _state == 'closing' or _state == 'cleanup':
                     continue
                 elif _state == 'running' or _state == 'queued':
-                    _jobs.append(_job)
+                    _jobs_active.append(_job)
                 else:
                     _job.die("@JManager - job state %s not allowed while in "
                              "scheduler queue" % _state)
@@ -258,28 +175,16 @@ class JobManager(object):
 
         Starts the cleanup for the jobs in separate threads.
         """
-        # Jobs ready for cleanup are put into the "closing" directory
-        try:
-            _queue = os.listdir(conf.gate_path_closing)
-        except:
-            logger.error("@JManager - Unable to read cleanup queue %s" %
-                         conf.gate_path_closing, exc_info=True)
-            return
 
-        for _jid in _queue:
-            logger.debug('@JManager - Detected cleanup job %s.' % _jid)
+        verbose('@JManager - Check for jobs marked for cleanup.')
 
-            # Create new job instance. It is possible that it is already
-            # created during initialization or while checking for old jobs to
-            # remove, therefore use self.get_job.
-            _job = self.get_job(_jid, create=True)
-            if _job is None:
-                continue
+        for _job in StateManager.get_job_list("closing").values():
+            logger.debug('@JManager - Detected cleanup job %s.' % _job.id)
 
             # Check for valid input data
             if not _job.get_exit_state():
                 _job.die("@JManager - Job %s in closing state yet no exit "
-                         "state defined." % _jid)
+                         "state defined." % _job.id)
                 continue
             if not _job.valid_data:
                 if _job.get_exit_state() == 'aborted':
@@ -287,10 +192,10 @@ class JobManager(object):
                 else:
                     _job.die("@JManager - Job %s has \"%s\" exit state set yet"
                              "there is no validated input data." %
-                             (_jid, _job.get_exit_state()))
+                             (_job.id, _job.get_exit_state()))
                 continue
 
-            _scheduler = self.schedulers[_job.valid_data['CIS_SCHEDULER']]
+            _scheduler = SchedulerStore[_job.valid_data['CIS_SCHEDULER']]
             # Run cleanup in separate threads
             try:
                 # Mark job as in cleanup state
@@ -320,39 +225,29 @@ class JobManager(object):
         If found and job is still running kill it.
         """
 
-        # Symlinks in "stop" dir mark jobs for removal
-        try:
-            _queue = os.listdir(conf.gate_path_stop)
-        except:
-            logger.error("@JManager - Unable to read kill queue: %s." %
-                         conf.gate_path_stop, exc_info=True)
-            return
+        verbose('@JManager - Check for kill requests.')
 
-        for _jid in _queue:
+        for _job in StateManager.get_job_list("stop").values():
             logger.debug('@JManager - Detected job marked for a kill: %s' %
-                         _jid)
-
-            _job = self.get_job(_jid, create=True)
-            if _job is None:
-                continue
+                         _job.id)
 
             # Stop if it is running
             if _job.get_state() == 'running' or \
                     _job.get_state() == 'queued':
-                self.schedulers[_job.valid_data['CIS_SCHEDULER']].stop(
+                SchedulerStore[_job.valid_data['CIS_SCHEDULER']].stop(
                     _job, 'User request', ExitCodes.UserKill
                 )
             elif _job.get_state() == 'waiting':
                 _job.finish('User request', 'killed', ExitCodes.UserKill)
             else:
                 logger.warning("@JManager - Cannot kill job %s. "
-                               "It is already finished." % _jid)
+                               "It is already finished." % _job.id)
 
             # Remove the kill mark
             try:
-                os.unlink(os.path.join(conf.gate_path_stop, _jid))
+                StateManager.set_flag(_job.id, "stop", False)
             except:
-                logger.error("Cannot remove kill mark for job %s." % _jid,
+                logger.error("Cannot remove kill flag for job %s." % _job.id,
                              exc_info=True)
 
     def check_deleted_jobs(self):
@@ -363,47 +258,22 @@ class JobManager(object):
         running kill it.
         """
 
-        # Symlinks in "delete" dir mark jobs for removal
-        try:
-            _queue = os.listdir(conf.gate_path_delete)
-        except:
-            logger.error("@JManager - Unable to read delete queue: %s." %
-                         conf.gate_path_delete, exc_info=True)
-            return
+        verbose('@JManager - Check for delete requests.')
 
-        for _jid in _queue:
+        for _job in StateManager.get_job_list("delete").values():
+            _jid = _job.id
             logger.debug('@JManager - Detected job marked for deletion: %s' %
                          _jid)
 
-            _job = self.get_job(_jid, create=True)
-            if _job is None:
-                continue
-
             # Stop if it is running
             if _job.get_state() in ('running', 'queued'):
-                self.schedulers[_job.valid_data['CIS_SCHEDULER']].stop(
+                SchedulerStore[_job.valid_data['CIS_SCHEDULER']].stop(
                     _job, "User request", ExitCodes.Delete
                 )
                 continue
 
             if _job.get_state() in ('cleanup', 'running'):
                 continue
-
-            try:
-                # Remove job symlinks
-                for _state, _path in conf.gate_path.items():
-                    _name = os.path.join(_path, _jid)
-                    if os.path.exists(_name):
-                        os.unlink(_name)
-                # Remove job file after symlinks (otherwise os.path.exists
-                # fails on symlinks)
-                os.unlink(os.path.join(conf.gate_path_jobs, _jid))
-                # Remove output status file
-                _name = os.path.join(conf.gate_path_exit, _jid)
-                if os.path.exists(_name):
-                    os.unlink(_name)
-            except:
-                logger.error("Cannot remove job %s." % _jid, exc_info=True)
 
             # Remove the output directory and its contents
             _output = os.path.join(conf.gate_path_output, _jid)
@@ -418,8 +288,12 @@ class JobManager(object):
                 logger.error("Cannot remove job output %s." % _jid,
                              exc_info=True)
 
-            # Remove job from the list
-            del JobStore[_jid]
+            # Delete the job
+            try:
+                StateManager.delete_job(_jid)
+            except:
+                logger.error("Cannot remove job %s." % _jid, exc_info=True)
+
             logger.info('@JManager - Job %s removed with all data.' %
                         _jid)
 
@@ -428,43 +302,27 @@ class JobManager(object):
 
         If found mark them for removal."""
 
-        try:
-            _queue = os.listdir(conf.gate_path_jobs)
-        except:
-            logger.error(u"@JManager - Unable to read job queue: %s." %
-                         conf.gate_path_jobs, exc_info=True)
-            return
+        verbose('@JManager - Check for expired jobs.')
 
-        for _jid in _queue:
-            _job = self.get_job(_jid, create=True)
-            if _job is None or _job.service is None:
-                continue
-
+        for _job in StateManager.get_job_list('all', sloppy=True).values():
             _delete_dt = ServiceStore[_job.service].config['max_lifetime']
             if _delete_dt == 0:
                 continue
             _state = _job.get_state()
             _now = datetime.now()
             _dt = timedelta(hours=_delete_dt)
-            _path = None
+            _path_time = None
             try:
-                if _state in ['killed', 'aborted']:
-                    _path = os.path.join(conf.gate_path_output, _jid)
-                    # If job was killed in Waiting or Queued states it could
-                    # have not produced output
-                    if not os.path.isdir(_path):
-                        _path = os.path.join(conf.gate_path_jobs, _jid)
-                elif _state in ['done', 'failed']:
-                    _path = os.path.join(conf.gate_path_output, _jid)
+                if _state in ('done', 'failed', 'killed', 'aborted'):
+                    _path_time = StateManager.get_time(_job.id, 'stop')
                 elif _state == 'running':
-                    _path = os.path.join(conf.gate_path_running, _jid)
-                    _delete_dt = ServiceStore[
-                        _job.service].config['max_runtime']
+                    _path_time = StateManager.get_time(_job.id, 'start')
+                    _delete_dt = \
+                        ServiceStore[_job.service].config['max_runtime']
                     _dt = timedelta(hours=_delete_dt)
                 else:
                     continue
 
-                _path_time = datetime.fromtimestamp(os.path.getctime(_path))
                 verbose("@JManager - Removal dt: %s" % _dt)
                 verbose("@JManager - Path time: %s" % _path_time)
                 verbose("@JManager - Current time: %s" % _now)
@@ -474,7 +332,7 @@ class JobManager(object):
             except:
                 logger.error(
                     "@JManager - Unable to extract job change time: %s." %
-                    _jid, exc_info=True)
+                    _job.id, exc_info=True)
                 continue
 
             if _path_time < _now:
@@ -503,6 +361,9 @@ class JobManager(object):
             min job life time.
         :return: True if quota is not reached or garbage collection succeeded.
         """
+
+        verbose('@JManager - Garbage collect.')
+
         # Get Service instance
         _service = ServiceStore[service]
         _start_size = _service.current_size
@@ -529,24 +390,20 @@ class JobManager(object):
             _dt = timedelta(hours=_protect_dt)
             _state = _job.get_state()
             _now = datetime.now()
-            _path = None
             try:
                 # We consider only jobs that could have produced output
                 if _state in ['done', 'failed', 'killed', 'aborted']:
-                    _path = os.path.join(conf.gate_path_output, _jid)
-                    if not os.path.isdir(_path):
-                        continue
+                    _time = StateManager.get_time(_jid, 'stop')
                 else:
                     continue
 
                 # Jobs that are too young and are still in protection interval
                 # are skipped
-                _path_time = datetime.fromtimestamp(os.path.getctime(_path))
-                if _path_time + _dt > _now:
+                if _time + _dt > _now:
                     continue
 
                 # Calculate lifetime
-                _lifetime = _now - _path_time
+                _lifetime = _now - _time
             except:
                 logger.error(
                     "@JManager - Unable to extract job change time: %s." %
@@ -604,7 +461,7 @@ class JobManager(object):
         """
         # During validation default values are set in Job.valid_data
         # Now we can access scheduler selected for current Job
-        _scheduler = self.schedulers[job.valid_data['CIS_SCHEDULER']]
+        _scheduler = SchedulerStore[job.valid_data['CIS_SCHEDULER']]
         # Ask scheduler to generate scripts and submit the job
         if _scheduler.generate_scripts(job):
             if _scheduler.chain_input_data(job):
@@ -621,7 +478,7 @@ class JobManager(object):
             if _state in ('done', 'failed', 'aborted', 'killed'):
                 continue
             if _state in ('queued', 'running'):
-                _scheduler = self.schedulers[_job.valid_data['CIS_SCHEDULER']]
+                _scheduler = SchedulerStore[_job.valid_data['CIS_SCHEDULER']]
                 _scheduler.stop(_job, 'Server shutdown', ExitCodes.Shutdown)
             else:
                 _job.finish('Server shutdown', state='killed',

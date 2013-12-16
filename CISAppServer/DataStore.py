@@ -167,3 +167,5 @@ class JobStore(dict):
         return _id_list
 
 JobStore = JobStore()
+
+SchedulerStore = {}

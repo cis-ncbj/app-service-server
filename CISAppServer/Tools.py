@@ -24,6 +24,7 @@ from yapsy.PluginManager import PluginManager
 
 from Config import conf, verbose, ExitCodes
 from DataStore import Service, ServiceStore, JobStore
+from Jobs import StateManager
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ class Validator(object):
             return True
 
         if not job.data:
+            job.service = 'default'  # Make sure job.service is defined
             job.die("@Validator - Empty data dictionary",
                     exit_code=ExitCodes.Validate)
             return False
@@ -123,10 +125,14 @@ class Validator(object):
         if 'service' not in _data.keys() or \
            _data['service'] not in ServiceStore.keys() or \
            _data['service'] == 'default':
+            job.service = 'default'  # Make sure job.service is defined
             job.die("@Validator - Not supported service: %s." %
                     _data['service'], err=False,
                     exit_code=ExitCodes.Validate)
             return False
+
+        job.service = _data['service']
+        _service = ServiceStore[_data['service']]
 
         # Make sure that input dictionary exists
         if 'input' not in _data.keys():
@@ -154,9 +160,6 @@ class Validator(object):
                         "definition." % _k, err=False,
                         exit_code=ExitCodes.Validate)
                 return False
-
-        job.service = _data['service']
-        _service = ServiceStore[_data['service']]
 
         # Load defaults
         _variables = {
@@ -575,7 +578,7 @@ class Scheduler(object):
 
         # Cleanup of the output
         try:
-            os.unlink(os.path.join(self.queue_path, job.id))
+            StateManager.set_scheduler_id(job.id, self.name, None)
             for _chain in job.chain:
                 shutil.rmtree(os.path.join(_work_dir, _chain),
                               ignore_errors=True)
@@ -639,15 +642,17 @@ class Scheduler(object):
 
         _work_dir = os.path.join(self.work_path, job.id)
         _out_dir = os.path.join(conf.gate_path_output, job.id)
-        _queue_id = os.path.join(self.queue_path, job.id)
 
         # Remove job from scheduler queue if it was queued
-        if os.path.exists(_queue_id):
-            try:
-                os.unlink(_queue_id)
-            except:
-                logger.error("@Scheduler - Unable to remove job scheduler ID "
-                             "file %s" % _queue_id, exc_info=True)
+        try:
+            StateManager.set_scheduler_id(job.id, self.name, None)
+        except OSError as e:
+            if e.errno != 2:
+                logger.error("@Scheduler - Unable to remove job %s from "
+                             "scheduler queue" % job.id, exc_info=True)
+        except:
+            logger.error("@Scheduler - Unable to remove job %s from "
+                         "scheduler queue" % job.id, exc_info=True)
 
         # Remove output dir if it exists.
         if os.path.isdir(_out_dir):
@@ -856,6 +861,8 @@ class PbsScheduler(Scheduler):
         self.default_queue = conf.pbs_default_queue
         #: Maximum number of concurent jobs
         self.max_jobs = conf.pbs_max_jobs
+        #: Scheduler name
+        self.name = "pbs"
 
     def submit(self, job):
         """
@@ -867,13 +874,10 @@ class PbsScheduler(Scheduler):
         """
 
         # Check that maximum job limit is not exceeded
-        try:
-            _jobs = os.listdir(self.queue_path)
-        except:
-            logger.error("@PBS - unable to read queue directory %s." %
-                         self.queue_path, exc_info=True)
+        _job_count = StateManager.get_scheduler_count(self.name)
+        if _job_count < 0:
             return False
-        if len(_jobs) >= self.max_jobs:
+        if _job_count >= self.max_jobs:
             return False
 
         # Path names
@@ -899,7 +903,7 @@ class PbsScheduler(Scheduler):
             _output = _proc.communicate()[0]
             verbose(_output)
             # Hopefully qsub returned meaningful job ID
-            _jid = _output.strip()
+            _pbs_id = _output.strip()
             # Check return code. If qsub was not killed by signal Popen will
             # not rise an exception
             if _proc.returncode != 0:
@@ -912,9 +916,14 @@ class PbsScheduler(Scheduler):
             job.die("@PBS - Unable to submit job %s." % job.id, exc_info=True)
             return False
 
-        # Store the PBS job ID into a file
-        with open(os.path.join(self.queue_path, job.id), 'w') as _jid_file:
-            _jid_file.write(_jid)
+        # Store the PBS job ID
+        try:
+            StateManager.set_scheduler_id(job.id, self.name, _pbs_id)
+        except:
+            job.die("@PBS - Unable to store PBS id for job %s." % job.id,
+                    exc_info=True)
+            return False
+
         logger.info("Job successfully submitted: %s" % job.id)
         return True
 
@@ -972,15 +981,7 @@ class PbsScheduler(Scheduler):
             verbose(_job_states)
 
         # Iterate through jobs
-        for _job in jobs:
-            # Extract PBS id for the job
-            _pbs_id = ''
-            try:
-                with open(os.path.join(self.queue_path, _job.id)) as _pbs_file:
-                    _pbs_id = _pbs_file.readline().strip()
-            except:
-                _job.die('@PBS - Unable to read PBS job ID', exc_info=True)
-
+        for _pbs_id, _job in jobs.items():
             # Check if the job exists in the PBS
             if _pbs_id not in _job_states.keys():
                 _job.die('@PBS - Job does not exist in the PBS')
@@ -1038,10 +1039,10 @@ class PbsScheduler(Scheduler):
         """
         _pbs_id = ''
 
+        # @TODO move to state manager
         # Get Job PBS ID
         try:
-            with open(os.path.join(self.queue_path, job.id)) as _pbs_file:
-                _pbs_id = _pbs_file.readline().strip()
+            _pbs_id = StateManager.get_scheduler_id(job.id, self.name)
         except:
             job.die('@PBS - Unable to read PBS job ID', exc_info=True)
             return
@@ -1091,6 +1092,8 @@ class SshScheduler(Scheduler):
         self.default_queue = conf.ssh_default_queue
         #: Dict of maximum number of concurent jobs per execution host
         self.max_jobs = conf.ssh_max_jobs
+        #: Scheduler name
+        self.name = "ssh"
 
     def submit(self, job):
         """
@@ -1107,13 +1110,10 @@ class SshScheduler(Scheduler):
             _queue = job.valid_data['CIS_SSH_HOST']
 
         # Check that maximum job limit is not exceeded
-        try:
-            _jobs = os.listdir(self.queue_path)
-        except:
-            logger.error("@PBS - unable to read queue directory %s." %
-                         self.queue_path, exc_info=True)
+        _job_count = StateManager.get_scheduler_count(self.name)
+        if _job_count < 0:
             return False
-        if len(_jobs) >= self.max_jobs[_queue]:
+        if _job_count >= self.max_jobs:
             return False
 
         # Path names
@@ -1137,7 +1137,7 @@ class SshScheduler(Scheduler):
             _output = _proc.communicate()[0]
             verbose(_output)
             # Hopefully shsub returned meaningful job ID
-            _jid = _output.strip()
+            _ssh_id = _output.strip()
             # Check return code. If ssh was not killed by signal Popen will
             # not rise an exception
             if _proc.returncode != 0:
@@ -1150,9 +1150,14 @@ class SshScheduler(Scheduler):
             job.die("@SSH - Unable to submit job %s." % job.id, exc_info=True)
             return False
 
-        # Store the SSH job ID into a file
-        with open(os.path.join(self.queue_path, job.id), 'w') as _jid_file:
-            _jid_file.write(_jid)
+        # Store the SSH job ID
+        try:
+            StateManager.set_scheduler_id(job.id, self.name, _ssh_id)
+        except:
+            job.die("@SSH - Unable to store SSH id for job %s." % job.id,
+                    exc_info=True)
+            return False
+
         logger.info("Job successfully submitted: %s" % job.id)
         return True
 
@@ -1164,7 +1169,7 @@ class SshScheduler(Scheduler):
         """
         # Extract list of user names and queues associated to the jobs
         _users = {}
-        for _job in jobs:
+        for _pid, _job in jobs.items():
             _service = ServiceStore[_job.service]
             _usr = _service.config['username']
             if _usr not in _users.keys():
@@ -1217,15 +1222,7 @@ class SshScheduler(Scheduler):
                         return
 
         # Iterate through jobs
-        for _job in jobs:
-            # Extract SSH id for the job
-            _pid = ''
-            try:
-                with open(os.path.join(self.queue_path, _job.id)) as _ssh_file:
-                    _pid = _ssh_file.readline().strip()
-            except:
-                _job.die('@SSH - Unable to read job PID', exc_info=True)
-
+        for _pid, _job in jobs.items():
             # Check if the job exists on a SSH execution host
             if _pid not in _job_states.keys():
                 _job.die('@SSH - Job does not exist on any of the SSH '
@@ -1278,8 +1275,7 @@ class SshScheduler(Scheduler):
 
         # Get Job PID
         try:
-            with open(os.path.join(self.queue_path, job.id)) as _ssh_file:
-                _pid = _ssh_file.readline().strip()
+            _pid = StateManager.get_scheduler_id(job.id, self.name)
         except:
             job.die('@SSH - Unable to read PID', exc_info=True)
             return

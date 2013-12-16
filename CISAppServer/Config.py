@@ -200,6 +200,8 @@ class Config(dict):
         self.gate_path_exit = None
         #: Path where jobs internal state is stored
         self.gate_path_opts = None
+        #: Path where job timestamps are stored
+        self.gate_path_time = None
         #: Path where waiting jobs are symlinked
         self.gate_path_waiting = None
         #: Path where queued jobs are symlinked
@@ -288,6 +290,7 @@ class Config(dict):
         self.gate_path_jobs = os.path.join(self.gate_path_shared, 'jobs')
         self.gate_path_exit = os.path.join(self.gate_path_shared, 'exit')
         self.gate_path_opts = os.path.join(self.gate_path_shared, 'opts')
+        self.gate_path_time = os.path.join(self.gate_path_shared, 'time')
 
         # Generate job state subdirs
         self.gate_path_waiting = os.path.join(self.gate_path_shared, 'waiting')
@@ -316,7 +319,7 @@ class Config(dict):
         }
 
         # Create those paths if they do not exist
-        _mkdirs = [
+        _mkdirs = (
             "daemon_path_workdir",
             "pbs_path_queue",
             "pbs_path_work",
@@ -328,6 +331,7 @@ class Config(dict):
             "gate_path_jobs",
             "gate_path_exit",
             "gate_path_opts",
+            "gate_path_time",
             "gate_path_delete",
             "gate_path_stop",
             "gate_path_waiting",
@@ -339,7 +343,7 @@ class Config(dict):
             "gate_path_failed",
             "gate_path_aborted",
             "gate_path_killed",
-        ]
+        )
         for _path in _mkdirs:
             if not os.path.isdir(self[_path]):
                 self.mkdir_p(self[_path])
