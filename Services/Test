@@ -25,6 +25,18 @@
             "default" : "",
             "values" : ["", "PBS -l nodes=30"]
         },
+        // PBS tag
+        "PBS_SLEEP_TAG" : {
+            "type" : "string",
+            "default" : "",
+            "values" : ["", "PBS -a"]
+        },
+        // PBS sleep date
+        "PBS_SLEEP_VALUE" : {
+            "type" : "int",
+            "default" : 0,
+            "values" : [0,999999]
+        },
         // Name of the test
         "TestName" : {
             "type" : "string",
@@ -73,7 +85,8 @@
             "TestName" : "WaitRun",
             "CIS_QUEUE" : "test_slc6",
             "COMMAND" : "/bin/ls",
-            "PBS_OPTS" : "PBS -l nodes=30",
+            "PBS_OPTS" : "",
+            "PBS_SLEEP_TAG" : "PBS -a",
             "SLEEP" : 1,
             "1Float" : -12.5,
             "2Float" : 9.66

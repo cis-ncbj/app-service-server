@@ -16,7 +16,7 @@ from Config import conf, verbose, ExitCodes
 from Jobs import Job, StateManager
 from DataStore import ServiceStore, JobStore, SchedulerStore
 
-version = "0.3"
+version = "0.5"
 
 logger = logging.getLogger(__name__)
 

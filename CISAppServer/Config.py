@@ -38,9 +38,11 @@ class ExitCodes:
     *  -98: Shutdown
     *  -97: Delete
     *  -96: UserKill
-    *  -95: Validate
+    *  -95: SchedulerKill
+    *  -94: Validate
     """
-    Undefined, Abort, Shutdown, Delete, UserKill, Validate = range(-100, -94)
+    Undefined, Abort, Shutdown, Delete, UserKill, SchedulerKill, Validate = \
+        range(-100, -93)
 
 
 class Config(dict):
@@ -97,6 +99,8 @@ class Config(dict):
         self.log_output = '/tmp/CISAppServer.log'  #: Log output file name
         self.log_level_cli = None  #: Logging level CLI override
         self.log_output_cli = None  #: Log output file name CLI override
+        #: Email to send the error messages
+        self.log_email = ""
         #: Configuration of logging module
         self.log_config = {
             'version': 1,
@@ -123,7 +127,7 @@ class Config(dict):
                     'formatter': 'verbose',
                     'mailhost': 'localhost',
                     'fromaddr': 'kklimaszewski@cis.gov.pl',
-                    'toaddrs': 'konrad.klimaszewski@gazeta.pl',
+                    'toaddrs': self.log_email,
                     'subject': 'AppServer Error',
                 },
                 'file': {
@@ -287,6 +291,11 @@ class Config(dict):
            'file' in self.log_config['handlers'].keys():
             self.log_config['handlers']['file']['filename'] = \
                 self.log_output
+        if not self.log_email:
+            del self.log_config['handlers']['mail']
+            self.log_config['root']['handlers'].remove('mail')
+        else:
+            self.log_config['handlers']['mail']['toaddrs'] = self.log_email
 
         # Normalize paths to full versions
         for _key, _value in self.items():
@@ -345,10 +354,6 @@ class Config(dict):
         # Create those paths if they do not exist
         _mkdirs = (
             "daemon_path_workdir",
-            "pbs_path_queue",
-            "pbs_path_work",
-            "ssh_path_queue",
-            "ssh_path_work",
             "gate_path_shared",
             "gate_path_output",
             "gate_path_dump",
@@ -372,6 +377,10 @@ class Config(dict):
             "gate_path_aborted",
             "gate_path_killed",
         )
+        if 'pbs' in self.config_schedulers:
+            _mkdirs.extend(("pbs_path_queue", "pbs_path_work"))
+        if 'ssh' in self.config_schedulers:
+            _mkdirs.extend(("ssh_path_queue", "ssh_path_work"))
         for _path in _mkdirs:
             if not os.path.isdir(self[_path]):
                 self.mkdir_p(self[_path])

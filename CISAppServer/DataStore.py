@@ -21,6 +21,7 @@ class Service(dict):
 
         :param name: The name of the service.
         :param data: Dict with service config read from JSON data file.
+
         Other arguments are passed to dict parent class.
         """
         # Service is a dict. Make all the keys accessible as attributes while

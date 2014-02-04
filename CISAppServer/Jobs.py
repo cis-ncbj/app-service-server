@@ -155,17 +155,17 @@ class Job(object):
         finalised. The "exit state" is set using :py:meth:`finish`.
 
         :return: One of valid job exit states or None if the "exit state" is
-        not yet defined:
+                 not yet defined:
 
-        * done:
-            job has finished,
-        * failed:
-            job has finished with non zero exit code,
-        * aborted:
-            an error occurred during job preprocessing, submission or
-            postprocessing,
-        * killed:
-            job was killed,
+          * done:
+              job has finished,
+          * failed:
+              job has finished with non zero exit code,
+          * aborted:
+              an error occurred during job preprocessing, submission or
+              postprocessing,
+          * killed:
+              job was killed,
         """
 
         return self.__exit_state

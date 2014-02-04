@@ -1,5 +1,6 @@
 #!/bin/sh
 #PBS -q @@{CIS_QUEUE}
+#@@{PBS_SLEEP_TAG} @@{PBS_SLEEP_VALUE}
 #@@{PBS_OPTS}
 
 echo "Commencing test: @@{TestName}" | tee -a progress.log
