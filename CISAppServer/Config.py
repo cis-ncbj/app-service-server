@@ -70,13 +70,20 @@ class Config(dict):
         # Define default values
         self.config_file = None  #: Config file name
         #: Sleep interval in seconds between job status queries
-        self.config_sleep_time = 3
+        self.config_sleep_time = 5
         #: Every n-th status query dump the progress logs
-        self.config_progress_step = 2
+        self.config_progress_step = 1
+        #: Every n-th status query run garbage collector
+        self.config_garbage_step = 5
         #: Timeout for job cleanup before forcing shutdown
         self.config_shutdown_time = 2
+        #: Timeout for jobs with wait flag in seconds (Job with wait flag will
+        #  be ignored when processing the waiting queue)
+        self.config_wait_time = 120
         #: Enabled schedulers
         self.config_schedulers = ('pbs', 'ssh')
+        #: Maximum number of all active jobs
+        self.config_max_jobs = 1000
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
@@ -212,19 +219,21 @@ class Config(dict):
         self.gate_path_closing = None
         #: Path where jobs during cleanup are symlinked
         self.gate_path_cleanup = None
-        #: Path were where done jobs are symlinked
+        #: Path where done jobs are symlinked
         self.gate_path_done = None
-        #: Path were where failed jobs are symlinked
+        #: Path where failed jobs are symlinked
         self.gate_path_failed = None
-        #: Path were where aborted jobs are symlinked
+        #: Path where aborted jobs are symlinked
         self.gate_path_aborted = None
-        #: Path were where killed jobs are symlinked
+        #: Path where killed jobs are symlinked
         self.gate_path_killed = None
-        #: Path were where jobs scheduled for removal are symlinked
-        self.gate_path_delete = None
-        #: Path were where jobs scheduled to be killed are symlinked
-        self.gate_path_stop = None
-        #: Dictionary of job states with corresponding paths
+        #: Path where job flags are stored
+        self.gate_path_flags = None
+        self.gate_path_flag_stop = None
+        self.gate_path_flag_delete = None
+        self.gate_path_flag_wait_quota = None
+        self.gate_path_flag_wait_input = None
+        self.gate_path_flag_old_api = None
         self.gate_path = {
             "waiting": None,
             "queued": None,
@@ -235,8 +244,11 @@ class Config(dict):
             "failed": None,
             "aborted": None,
             "killed": None,
-            "delete": None,
-            "stop": None,
+            "flag_stop": None,
+            "flag_delete": None,
+            "flag_wait_quota": None,
+            "flag_wait_input": None,
+            "flag_old_api": None,
         }
 
     def load(self, conf_name=None):
@@ -291,6 +303,17 @@ class Config(dict):
         self.gate_path_exit = os.path.join(self.gate_path_shared, 'exit')
         self.gate_path_opts = os.path.join(self.gate_path_shared, 'opts')
         self.gate_path_time = os.path.join(self.gate_path_shared, 'time')
+        self.gate_path_flags = os.path.join(self.gate_path_shared, 'flags')
+        self.gate_path_flag_stop = \
+            os.path.join(self.gate_path_flags, 'stop')
+        self.gate_path_flag_delete = \
+            os.path.join(self.gate_path_flags, 'delete')
+        self.gate_path_flag_wait_quota = \
+            os.path.join(self.gate_path_flags, 'wait_quota')
+        self.gate_path_flag_wait_input = \
+            os.path.join(self.gate_path_flags, 'wait_input')
+        self.gate_path_flag_old_api = \
+            os.path.join(self.gate_path_flags, 'old_api')
 
         # Generate job state subdirs
         self.gate_path_waiting = os.path.join(self.gate_path_shared, 'waiting')
@@ -302,8 +325,6 @@ class Config(dict):
         self.gate_path_failed = os.path.join(self.gate_path_shared, 'failed')
         self.gate_path_aborted = os.path.join(self.gate_path_shared, 'aborted')
         self.gate_path_killed = os.path.join(self.gate_path_shared, 'killed')
-        self.gate_path_delete = os.path.join(self.gate_path_shared, 'delete')
-        self.gate_path_stop = os.path.join(self.gate_path_shared, 'stop')
         self.gate_path = {
             "waiting": self.gate_path_waiting,
             "queued": self.gate_path_queued,
@@ -314,8 +335,11 @@ class Config(dict):
             "failed": self.gate_path_failed,
             "aborted": self.gate_path_aborted,
             "killed": self.gate_path_killed,
-            "delete": self.gate_path_delete,
-            "stop": self.gate_path_stop,
+            "flag_stop": self.gate_path_flag_stop,
+            "flag_delete": self.gate_path_flag_delete,
+            "flag_wait_quota": self.gate_path_flag_wait_quota,
+            "flag_wait_input": self.gate_path_flag_wait_input,
+            "flag_old_api": self.gate_path_flag_old_api,
         }
 
         # Create those paths if they do not exist
@@ -332,8 +356,12 @@ class Config(dict):
             "gate_path_exit",
             "gate_path_opts",
             "gate_path_time",
-            "gate_path_delete",
-            "gate_path_stop",
+            "gate_path_flags",
+            "gate_path_flag_stop",
+            "gate_path_flag_delete",
+            "gate_path_flag_wait_quota",
+            "gate_path_flag_wait_input",
+            "gate_path_flag_old_api",
             "gate_path_waiting",
             "gate_path_queued",
             "gate_path_running",

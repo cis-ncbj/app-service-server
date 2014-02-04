@@ -29,6 +29,18 @@ from Jobs import StateManager
 logger = logging.getLogger(__name__)
 
 
+class CisError(Exception):
+    """ Wrong job input. """
+
+
+class ValidatorError(Exception):
+    """ Wrong job input. """
+
+
+class ValidatorInputFileError(Exception):
+    """ Wrong job state exception. """
+
+
 def rmtree_error(function, path, exc_info):
     """Exception handler for shutil.rmtree()."""
 
@@ -60,7 +72,9 @@ class Validator(object):
         #: Min API level
         self.api_min = 1.0
         #: Max API level
-        self.api_max = 1.0
+        self.api_max = 2.0
+        #: Current API level
+        self.api_current = 2.0
         #: Current job instance
         self.job = None
         #: PluginManager instance
@@ -110,13 +124,12 @@ class Validator(object):
         # Do not validate jobs for the second time. This will conserve
         # resources in case shceduler queue is full and we try to resubmit
         if job.valid_data:
-            return True
+            return
 
         if not job.data:
             job.service = 'default'  # Make sure job.service is defined
-            job.die("@Validator - Empty data dictionary",
+            raise CisError("@Validator - Empty data dictionary",
                     exit_code=ExitCodes.Validate)
-            return False
 
         _data = job.data
 
@@ -126,10 +139,8 @@ class Validator(object):
            _data['service'] not in ServiceStore.keys() or \
            _data['service'] == 'default':
             job.service = 'default'  # Make sure job.service is defined
-            job.die("@Validator - Not supported service: %s." %
-                    _data['service'], err=False,
-                    exit_code=ExitCodes.Validate)
-            return False
+            raise ValidatorError("@Validator - Not supported service: %s." %
+                    _data['service'])
 
         job.service = _data['service']
         _service = ServiceStore[_data['service']]
@@ -138,28 +149,24 @@ class Validator(object):
         if 'input' not in _data.keys():
             _data['input'] = {}
         elif not isinstance(_data['input'], dict):
-            job.die("@Validator - 'input' section is not a dictionary",
-                    err=False, exit_code=ExitCodes.Validate)
-            return False
+            raise ValidatorError("@Validator - 'input' section is not a dictionary")
 
         # Make sure API level is correct
         if 'api' not in _data.keys():
-            job.die("@Validator - Job did not specify API level.", err=False,
-                    exit_code=ExitCodes.Validate)
-            return False
+            raise ValidatorError("@Validator - Job did not specify API level.")
         if not self.validate_float('api', _data['api'],
                                    self.api_min, self.api_max):
-            job.die("@Validator - API level %s is not supported." %
-                    _data['api'], err=False, exit_code=ExitCodes.Validate)
-            return False
+            raise ValidatorError("@Validator - API level %s is not supported." %
+                    _data['api'])
+        elif float(_data['api'] < self.api_current):
+            # Deprecated API requested. Mark as such
+            StateManager.set_flag(job.id, 'old_api')
 
         # Make sure no unsupported sections were passed
         for _k in _data.keys():
             if _k not in conf.service_allowed_sections:
-                job.die("@Validator - Section '%s' is not allowed in job "
-                        "definition." % _k, err=False,
-                        exit_code=ExitCodes.Validate)
-                return False
+                raise ValidatorError("@Validator - Section '%s' is not allowed in job "
+                        "definition." % _k)
 
         # Load defaults
         _variables = {
@@ -180,19 +187,15 @@ class Validator(object):
                     _v = int(_v)
                 elif not isinstance(_v, int):
                     # Value specified neither as int nor string - raise error
-                    job.die(
+                    raise ValidatorError(
                         "@Validator - Set variables have to be of type int or "
-                        "string. (%s: %s)" % (_k, _v),
-                        err=False, exit_code=ExitCodes.Validate
+                        "string. (%s: %s)" % (_k, _v)
                     )
-                    return False
                 if _v != 1:
-                    job.die(
+                    raise ValidatorError(
                         "@Validator - Set variables only accept value of 1. "
-                        "(%s: %s)" % (_k, _v),
-                        err=False, exit_code=ExitCodes.Validate
+                        "(%s: %s)" % (_k, _v)
                     )
-                    return False
                 _variables.update(
                     {_kk: _vv for _kk, _vv in
                      _service.sets[_k].items()}
@@ -202,26 +205,21 @@ class Validator(object):
         # Load variables
         for _k, _v in _data['input'].items():
             if _k in conf.service_reserved_keys or _k.startswith('CIS_CHAIN'):
-                job.die("@Validator - '%s' variable name is restricted." % _k,
-                        err=False, exit_code=ExitCodes.Validate)
-                return False
+                raise ValidatorError("@Validator - '%s' variable name is restricted." % _k)
             elif _k in _service.variables.keys():
                 _variables[_k] = _v
             else:
-                job.die("@Validator - Not supported variable: %s." % _k,
-                        err=False, exit_code=ExitCodes.Validate)
-                return False
+                raise ValidatorError("@Validator - Not supported variable: %s." % _k)
 
         # Check that all attribute names are defined in service configuration
         # Validate values of the attributes
         for _k, _v in _variables.items():
             if _k in _service.variables.keys():
                 if not self.validate_value(_k, _v, _service):
-                    job.die(
+                    raise ValidatorError(
                         "@Validator - Variable value not allowed: %s - %s." %
-                        (_k, _v), err=False, exit_code=ExitCodes.Validate
+                        (_k, _v)
                     )
-                    return False
                 else:
                     _variables[_k] = _v
                     logger.debug(
@@ -232,9 +230,9 @@ class Validator(object):
             # date
             elif _k in conf.service_reserved_keys:
                 if not self.validate_value(_k, _v, ServiceStore['default']):
-                    job.die(
+                    raise ValidatorError(
                         "@Validator - Variable value not allowed: %s - %s." %
-                        (_k, _v), err=False, exit_code=ExitCodes.Validate
+                        (_k, _v)
                     )
                     return False
                 else:
@@ -244,23 +242,17 @@ class Validator(object):
                         (_k, _v)
                     )
             else:
-                job.die("@Validator - Not supported variable: %s." % _k,
-                        err=False, exit_code=ExitCodes.Validate)
-                return False
+                raise ValidatorError("@Validator - Not supported variable: %s." % _k)
 
         # Validate job output chaining. Check if defined job IDs point to
         # existing jobs in 'done' state.
         if 'chain' in _data.keys():
             if not isinstance(_data['chain'], list) and \
                not isinstance(_data['chain'], tuple):
-                job.die("@Validator - 'chain' section is not a list",
-                        err=False, exit_code=ExitCodes.Validate)
-                return False
+                raise ValidatorError("@Validator - 'chain' section is not a list")
 
             if not self.validate_chain(_data['chain']):
-                job.die("@Validator - Bad job chain IDs.", err=False,
-                        exit_code=ExitCodes.Validate)
-                return False
+                raise ValidatorError("@Validator - Bad job chain IDs.")
             else:
                 job.chain = _data['chain']
                 # Generate keywords for script substitutions
@@ -277,8 +269,6 @@ class Validator(object):
         job.valid_data = _variables
         verbose('@Validator - Validated input data:')
         verbose(job.valid_data)
-
-        return True
 
     def validate_value(self, key, value, service):
         """
@@ -414,10 +404,18 @@ class Validator(object):
 
     def validate_file(self, key, job, service):
         """
-        :throws: Lots of stuff
+        :throws:
+        :throws:
         """
+        # Extract input file name
         _input_dir = os.path.join(conf.gate_path_input, job.id)
         _input_file = os.path.join(_input_dir, key)
+        # Check that input file is ready
+        if not os.path.isfile(_input_file):
+            raise ValidatorInputFileError("Missing input file %s." %
+                                          _input_file)
+
+        # Load plugin and run the validate method
         _plugin = self.pm.getPluginByName(service.variables[key]['plugin'],
                                           service.name)
         _plugin.plugin_object.validate(_input_file)
@@ -586,41 +584,42 @@ class Scheduler(object):
             logger.error("@Scheduler - Unable to clean up job output "
                          "directory %s" % _work_dir, exc_info=True)
 
-        try:
-            # Remove output dir if it exists.
-            _out_dir = os.path.join(conf.gate_path_output, job.id)
-            _dump_dir = os.path.join(conf.gate_path_dump, job.id)
-            if os.path.isdir(_out_dir):
-                logger.debug('@Scheduler - Remove existing output directory')
-                # out and dump should be on the same partition so that rename
-                # is used. This will make sure that processes reading from out
-                # will not cause rmtree to throw exceptions
-                shutil.move(_out_dir, _dump_dir)
-                shutil.rmtree(_dump_dir, ignore_errors=True)
-            shutil.move(_work_dir, conf.gate_path_output)
+        if os.path.isdir(_work_dir):
+            try:
+                # Remove output dir if it exists.
+                _out_dir = os.path.join(conf.gate_path_output, job.id)
+                _dump_dir = os.path.join(conf.gate_path_dump, job.id)
+                if os.path.isdir(_out_dir):
+                    logger.debug('@Scheduler - Remove existing output directory')
+                    # out and dump should be on the same partition so that rename
+                    # is used. This will make sure that processes reading from out
+                    # will not cause rmtree to throw exceptions
+                    shutil.move(_out_dir, _dump_dir)
+                    shutil.rmtree(_dump_dir, ignore_errors=True)
+                shutil.move(_work_dir, conf.gate_path_output)
 
-            # Make sure all files in the output directory are world readable -
-            # so that apache can actually serve them
-            logger.debug('@Scheduler - Make output directory world readable')
-            os.chmod(_out_dir, os.stat(_out_dir).st_mode |
-                     stat.S_IRUSR | stat.S_IXUSR |
-                     stat.S_IRGRP | stat.S_IXGRP |
-                     stat.S_IROTH | stat.S_IXOTH)
-            for _root, _dirs, _files in os.walk(_out_dir):
-                for _dir in _dirs:
-                    _name = os.path.join(_root, _dir)
-                    os.chmod(_name, os.stat(_name).st_mode |
-                             stat.S_IRUSR | stat.S_IXUSR |
-                             stat.S_IRGRP | stat.S_IXGRP |
-                             stat.S_IROTH | stat.S_IXOTH)
-                for _file in _files:
-                    _name = os.path.join(_root, _file)
-                    os.chmod(_name, os.stat(_name).st_mode |
-                             stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
-        except:
-            job.die("@Scheduler - Unable to retrive job output directory %s" %
-                    _work_dir, exc_info=True)
-            return
+                # Make sure all files in the output directory are world readable -
+                # so that apache can actually serve them
+                logger.debug('@Scheduler - Make output directory world readable')
+                os.chmod(_out_dir, os.stat(_out_dir).st_mode |
+                         stat.S_IRUSR | stat.S_IXUSR |
+                         stat.S_IRGRP | stat.S_IXGRP |
+                         stat.S_IROTH | stat.S_IXOTH)
+                for _root, _dirs, _files in os.walk(_out_dir):
+                    for _dir in _dirs:
+                        _name = os.path.join(_root, _dir)
+                        os.chmod(_name, os.stat(_name).st_mode |
+                                 stat.S_IRUSR | stat.S_IXUSR |
+                                 stat.S_IRGRP | stat.S_IXGRP |
+                                 stat.S_IROTH | stat.S_IXOTH)
+                    for _file in _files:
+                        _name = os.path.join(_root, _file)
+                        os.chmod(_name, os.stat(_name).st_mode |
+                                 stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+            except:
+                job.die("@Scheduler - Unable to retrive job output directory %s" %
+                        _work_dir, exc_info=True)
+                return
 
         # Update service quota
         ServiceStore[job.service].update_job(job)

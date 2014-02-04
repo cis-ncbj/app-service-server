@@ -136,6 +136,20 @@ class Service(dict):
         verbose("@Service - Reclaimed %s MB of storage (%s)." %
                 ((job.get_size()/1000000), self.name))
 
+    def is_full(self):
+        _delta = self.config['job_size']
+        _quota = self.config['quota']
+
+        # Check quota - size is stored in bytes while quota and delta in MBs
+        if self.current_size + _delta < _quota and \
+           self.real_size < _quota * 1.3:
+            return False
+
+        verbose("Quota: %s" % _quota)
+        verbose("Delta: %s" % _delta)
+        verbose("Size: %s" % self.current_size)
+        return True
+
 
 ServiceStore = {}
 

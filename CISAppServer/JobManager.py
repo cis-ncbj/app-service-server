@@ -11,8 +11,7 @@ import logging
 import threading
 from datetime import datetime, timedelta
 
-import Tools as T
-
+from Tools import Validator, ValidatorInputFileError, ValidatorError, PbsScheduler, SshScheduler, rmtree_error
 from Config import conf, verbose, ExitCodes
 from Jobs import Job, StateManager
 from DataStore import ServiceStore, JobStore, SchedulerStore
@@ -41,12 +40,12 @@ class JobManager(object):
         Existing state is purged.
         """
         # Initialize Validator and PbsManager
-        self.validator = T.Validator()  #: Validator instance
+        self.validator = Validator()  #: Validator instance
         for _scheduler in conf.config_schedulers:
             if _scheduler == 'pbs':
-                SchedulerStore[_scheduler] = T.PbsScheduler()
+                SchedulerStore[_scheduler] = PbsScheduler()
             elif _scheduler == 'ssh':
-                SchedulerStore[_scheduler] = T.SshScheduler()
+                SchedulerStore[_scheduler] = SshScheduler()
 
         # State of the job queue
         self.__queue_running = True
@@ -97,33 +96,114 @@ class JobManager(object):
 
         verbose('@JManager - Check for new jobs.')
 
-        for _job in StateManager.get_job_list("waiting", create=True).values():
-            logger.debug('@JManager - Detected new job %s.' % _job.id)
+        _now = datetime.now()
+        # Wait timeout
+        _dt = timedelta(seconds=conf.config_wait_time)
+        # Max wait timeout for job submission (e.g. for input upload)
+        _dt_final = timedelta(hours=conf.service_max_lifetime)
 
-            if not self.validator.validate(_job):  # Validate input
+        # Count current active jobs
+        _queue_count = StateManager.get_job_count("queued")
+        _run_count = StateManager.get_job_count("running")
+        _close_count = StateManager.get_job_count("closing")
+        _clean_count = StateManager.get_job_count("cleanup")
+
+        # Available job slots
+        _new_slots = conf.config_max_jobs - _queue_count - _run_count - \
+            _close_count - _clean_count
+
+        _i = 0
+        for _job in StateManager.get_job_list("waiting", create=True).values():
+            if StateManager.get_flag(_job.id, 'delete'):
                 continue
 
+
+            # Check for job slots left
+            if _i >= _new_slots:
+                break
+
+            # Check if the job was flagged to wait and skip it if the wait
+            # timeout did not expire yet.
+            try:
+                _wait_input = StateManager.get_flag(_job.id, "wait_input")
+                _wait_quota = StateManager.get_flag(_job.id, "wait_quota")
+
+                # Check max wait time for input timeouts
+                if _wait_input:
+                    _submit_time = StateManager.get_time(_job.id, "submit")
+                    _submit_time += _dt_final
+
+                    if _submit_time < _now:
+                        _job.die("@JManager - Input file not available for "
+                                 "job %s. Time out." % _job.id)
+                        continue
+
+                # Check wait timeout
+                if _wait_input or _wait_quota:
+                    _wait_time = StateManager.get_time(_job.id, "wait")
+                    _wait_time += _dt
+                    if _wait_time > _now:
+                        verbose('@JManager - Job %s in wait state. End: %s, Now: %s.' % (_job.id, _wait_time, _now))
+                        continue
+                    else:
+                        verbose('@JManager - Job %s wait finished.' % _job.id)
+                        if _wait_input:
+                            StateManager.set_flag(_job.id, "wait_input", False)
+                        if _wait_quota:
+                            StateManager.set_flag(_job.id, "wait_quota", False)
+            except:
+                verbose('@JManager - Wait flag extraction failed for job %s.' % _job.id,
+                        exc_info=True)
+                # Let's ignore exceptions and treat such jobs as without wait
+                # flags
+                pass
+
+            logger.debug('@JManager - Detected new job %s.' % _job.id)
+
+            # Validate input
+            try:
+                self.validator.validate(_job)
+            except ValidatorInputFileError as e:
+                # The input file is not available yet. Flag the job to wait.
+                StateManager.set_flag(_job.id, "wait_input")
+                StateManager.set_time(_job.id, "wait")
+                continue
+            except ValidatorError as e:
+                _job.die("@JManager - Job %s validation failed." % _job.id,
+                         exc_info=True, err=False, exit_code=ExitCodes.Validate)
+                continue
+            except:
+                _job.die("@JManager - Job %s validation failed." % _job.id,
+                         exc_info=True, exit_code=ExitCodes.Validate)
+                continue
+            verbose('@JManager - Check for new jobs.')
+
+            # Check the service quota
             _service_name = _job.service
             _service = ServiceStore[_service_name]
-            if not self.collect_garbage(_service_name):
+            if _service.is_full():
+                # Limit the number of warning messages
                 if self.__w_counter_quota[_service_name] < \
                    6 * 60 * 60 / conf.config_sleep_time:
                     self.__w_counter_quota[_service_name] += 1
                     if _service.current_size != \
                        self.__last_service_size[_service_name]:
                         logger.warning(
-                            "@JManager - Cannot collect garbage for service: "
-                            "%s" % _job.service
+                            "@JManager - Quota for service %s exceeded." %
+                            _service_name
                         )
                         self.__last_service_size[_service_name] = \
                             _service.current_size
                 else:
                     logger.error(
-                        "@JManager - Cannot collect garbage for service: %s. "
+                        "@JManager - Quota for service %s exceeded. "
                         "Message repeated 100 times." %
-                        _job.service
+                        _service_name
                     )
                     self.__w_counter_quota[_service_name] = 0
+                # Flag the job to wait (no need to check the quota every tick)
+                StateManager.set_flag(_job.id, 'wait_quota')
+                StateManager.set_time(_job.id, 'wait')
                 continue
             else:
                 self.__last_service_size[_service_name] = \
@@ -140,6 +220,9 @@ class JobManager(object):
             except:
                 _job.die("@JManager - Cannot start job %s." % _job.id,
                          exc_info=True)
+                continue
+
+            _i += 1
 
     def check_running_jobs(self):
         """
@@ -227,7 +310,7 @@ class JobManager(object):
 
         verbose('@JManager - Check for kill requests.')
 
-        for _job in StateManager.get_job_list("stop").values():
+        for _job in StateManager.get_job_list('flag_stop').values():
             logger.debug('@JManager - Detected job marked for a kill: %s' %
                          _job.id)
 
@@ -260,7 +343,7 @@ class JobManager(object):
 
         verbose('@JManager - Check for delete requests.')
 
-        for _job in StateManager.get_job_list("delete").values():
+        for _job in StateManager.get_job_list('flag_delete').values():
             _jid = _job.id
             logger.debug('@JManager - Detected job marked for deletion: %s' %
                          _jid)
@@ -281,7 +364,7 @@ class JobManager(object):
             try:
                 if os.path.isdir(_output):
                     shutil.move(_output, _dump)
-                    shutil.rmtree(_dump, onerror=T.rmtree_error)
+                    shutil.rmtree(_dump, onerror=rmtree_error)
                     # Update service quota status
                     ServiceStore[_job.service].remove_job(_job)
             except:
@@ -305,9 +388,13 @@ class JobManager(object):
         verbose('@JManager - Check for expired jobs.')
 
         for _job in StateManager.get_job_list('all', sloppy=True).values():
+            if StateManager.get_flag(_job.id, 'delete'):
+                continue
+
             _delete_dt = ServiceStore[_job.service].config['max_lifetime']
             if _delete_dt == 0:
                 continue
+
             _state = _job.get_state()
             _now = datetime.now()
             _dt = timedelta(hours=_delete_dt)
@@ -371,19 +458,14 @@ class JobManager(object):
         _quota = _service.config['quota']
 
         # Check quota - size is stored in bytes while quota and delta in MBs
-        if _service.current_size + _delta < _quota and \
-           _service.real_size < _quota * 1.3 and \
-           not full:
-            return True
-
-        logger.debug("@JManager - Quota for service %s exceeded." % service)
-        verbose("Quota: %s" % _quota)
-        verbose("Delta: %s" % _delta)
-        verbose("Size: %s" % _service.current_size)
+        if not _service.is_full() and not full:
+            return
 
         _job_table = []  # List of tuples (lifetime, job)
         for _jid, _job in JobStore.items():
             if _job.service != service:
+                continue
+            if StateManager.get_flag(_job.id, 'delete'):
                 continue
             # Get protection interval
             _protect_dt = _service.config['min_lifetime']
@@ -486,6 +568,13 @@ class JobManager(object):
 
         time.sleep(conf.config_shutdown_time)
         self.check_cleanup()
+        time.sleep(conf.config_shutdown_time)
+
+        for _thread in self.__thread_list:
+            # @TODO Kill the thread
+            _thread.join()
+            self.__thread_list.remove(_thread)
+            logger.debug("@JManager - Removed finished cleanup thread.")
 
         for _job in JobStore.values():
             _state = _job.get_state()
@@ -518,6 +607,7 @@ class JobManager(object):
         * Check for jobs to be removed - delete all related resources.
         """
 
+        _n = 0
         while(1):
             time.sleep(conf.config_sleep_time)
             if self.__queue_running:
@@ -525,5 +615,10 @@ class JobManager(object):
             self.check_running_jobs()
             self.check_job_kill_requests()
             self.check_cleanup()
-            self.check_old_jobs()
+            if _n >= conf.config_garbage_step:
+                for _service in ServiceStore.keys():
+                    self.collect_garbage(_service)
+                self.check_old_jobs()
+                _n = 0
             self.check_deleted_jobs()
+            _n += 1

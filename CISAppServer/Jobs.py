@@ -11,13 +11,13 @@ from subprocess import Popen, PIPE, STDOUT
 from datetime import datetime
 
 from Config import conf, verbose, ExitCodes
-from DataStore import JobStore, SchedulerStore
+from DataStore import JobStore, SchedulerStore, ServiceStore
 
 
 logger = logging.getLogger(__name__)
 
 
-class JobBadState(Exception):
+class JobBadStateError(Exception):
     """ Wrong job state exception. """
 
 
@@ -94,7 +94,7 @@ class Job(object):
         _time = None
         try:
             _time = StateManager.get_time(self.id, 'submit')
-        except JobBadState:
+        except JobBadStateError:
             pass
         except:
             self.die(u"@Job - Unable to check submit time (%s)." % self.id,
@@ -421,9 +421,10 @@ class StateManager(object):
         """
         Get a dictionary of jobs that are in a selected state.
 
-        :param state: Specifies state for which Jobs will be selected. For
-            valid states see :py:meth:`get_state`. To select all jobs specify
-            'all' as the state.
+	:param state: Specifies state for which Jobs will be selected. To
+	    select all jobs specify 'all' as the state. Valid states consist of
+	    job states and flags: waiting, queued, running, closing, cleanup,
+            done, failed, aborted, killed, flag_delete, flag_stop
         :param create: For jobs that do not have a matching Job instance
             an ERROR message is logged. When create is True a new Job object is
             created and added to the JobStore,
@@ -435,7 +436,8 @@ class StateManager(object):
         :return: Dictionary with job_id as key and Job instance as value.
         """
         _states = ("waiting", "queued", "running", "closing", "cleanup",
-                   "done", "failed", "aborted", "killed", "delete", "stop")
+                   "done", "failed", "aborted", "killed", "flag_delete",
+                   "flag_stop")
         if state != 'all' and state not in _states:
             logger.error("@StateManager - Unknown state: %s" % state)
             return
@@ -448,7 +450,7 @@ class StateManager(object):
         try:
             _list = os.listdir(_path)
         except:
-            logger.error(u"@JManager - Unable to read directory: %s." %
+            logger.error(u"@StateManager - Unable to read directory: %s." %
                          _path, exc_info=True)
             return
 
@@ -459,6 +461,39 @@ class StateManager(object):
             _jobs[_jid] = _job
 
         return _jobs
+
+    def get_job_count(self, state="all"):
+        """
+        Get a count of jobs that are in a selected state.
+
+	:param state: Specifies state for which Jobs will be selected. To
+	    select all jobs specify 'all' as the state. Valid states consist of
+	    job states and flags: waiting, queued, running, closing, cleanup,
+            done, failed, aborted, killed, flag_delete, flag_stop
+
+        :return: Number of jobs in the selected state, or -1 in case of error.
+        """
+        _job_count = -1
+
+        _states = ("waiting", "queued", "running", "closing", "cleanup",
+                   "done", "failed", "aborted", "killed", "flag_delete",
+                   "flag_stop")
+        if state != 'all' and state not in _states:
+            logger.error("@StateManager - Unknown state: %s" % state)
+            return _job_count
+
+        _path = conf.gate_path_jobs
+        if state != 'all':
+            _path = conf.gate_path[state]
+
+        try:
+            _list = os.listdir(_path)
+        except:
+            logger.error(u"@StateManager - Unable to read directory: %s." %
+                         _path, exc_info=True)
+            return _job_count
+
+        return len(_list)
 
     def get_scheduler_list(self, scheduler):
         """
@@ -652,7 +687,7 @@ class StateManager(object):
         if sid is not None:
             with open(_fname, 'w') as _sid_file:
                 _sid_file.write(sid)
-        else:
+        elif os.path.isfile(_fname):
             os.unlink(_fname)
 
     def get_time(self, jid, event="start"):
@@ -660,24 +695,28 @@ class StateManager(object):
         Get the time of job submit, start and stop events.
 
         :param jid: Job ID,
-        :param event: Type of time event: submit, start, stop,
+        :param event: Type of time event: submit, start, stop, wait
         :return: datetime instance with time of the event,
         :throw JobBadState: exception is raised when event time stamp is
           missing, it is up to the caller to decide if this is reasonable or an
           error,
         :throw:
         """
-        if event not in ('start', 'stop', 'submit'):
+        if event not in ('start', 'stop', 'submit', 'wait'):
             raise Exception("Unknown time event: %s." % event)
 
+        # Timestamps are stored in the time directory as files with names
+        # concatanated from event name and job ID.
         _path = os.path.join(conf.gate_path_time, event + '_' + jid)
         if not os.path.exists(_path):
+            # Raise JobBadStateError if time stamp does not exist so that
+            # caller can deside if that is fine
             if event == 'start':
-                raise JobBadState("Job %s not started yet." % jid)
+                raise JobBadStateError("Job %s not started yet." % jid)
             elif event == 'stop':
-                raise JobBadState("Job %s not finished yet." % jid)
+                raise JobBadStateError("Job %s not finished yet." % jid)
             else:
-                raise JobBadState("Job %s timestamp missing." % jid)
+                raise JobBadStateError("Job %s timestamp missing." % jid)
         _path_time = datetime.fromtimestamp(os.path.getctime(_path))
         return _path_time
 
@@ -686,14 +725,16 @@ class StateManager(object):
         Set the time of job submit, start and stop events.
 
         :param jid: Job ID,
-        :param event: Type of time event: submit, start, stop,
+        :param event: Type of time event: submit, start, stop, wait
         :param time_stamp: datetime instance with time of the event. If set to
           None use current time,
         :throw:
         """
-        if event not in ('start', 'stop', 'submit'):
+        if event not in ('start', 'stop', 'submit', 'wait'):
             raise Exception("Unknown time state: %s." % event)
 
+        # Timestamps are stored in the time directory as files with names
+        # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, event + "_" + jid)
         with file(_fname, 'a'):
             os.utime(_fname, time_stamp)
@@ -704,21 +745,32 @@ class StateManager(object):
 
         :param jid: Job Id,
         :return: dictionary with job internal data e.g. exit_state
+        :throws:
         """
         _name = os.path.join(conf.gate_path_opts, jid)
         _data = {}
+        # Retrieve the auxiliary info from an .opt file
         if os.path.isfile(_name):
             with open(_name) as _f:
                 _data = json.load(_f)
         return _data
 
     def set_data(self, jid, data):
+        """
+	Set job persistent data as dictionary of key:value pairs.  Overwrites
+	current job state. To append new data use :py:meth:`get_data` to
+        extract current one first and specify as "data" the full data set.
+
+        :param jid: Job ID,
+        :param data: dictionary with job internal data e.g. exit_state
+        :throws:
+        """
         _allowed = ("exit_state", "exit_code", "exit_message")
         for _key in data.keys():
             if _key not in _allowed:
                 raise Exception("Not allowed data key: %s" % _key)
 
-        # Store the exit info into a .opt file
+        # Store the auxiliary info into an .opt file
         _opt = os.path.join(conf.gate_path_opts, jid)
         with open(_opt, 'w') as _f:
             json.dump(data, _f)
@@ -728,28 +780,37 @@ class StateManager(object):
         Get job boolean flag. Can be used to mark job for future actions.
 
         :param jid: Job ID,
-        :param flag: Name of the flag. Allowed values: stop, delete
+        :param flag: Name of the flag. Allowed values: stop, delete,
+          wait_input, wait_quota, old_api
         :return: Value of the flag (True or False)
+        :throws:
         """
-        _flags = ("stop", "delete")
+        _flags = ("stop", "delete", "wait_quota", "wait_input", "old_api")
         if flag not in _flags:
             raise Exception("Unknown flag: %s" % flag)
 
-        return os.path.exists(os.path.join(conf.gate_path[flag], jid))
+        # Flags are stored in sepearate directories with names prefixed by
+        # "flag_"
+        return os.path.exists(
+            os.path.join(conf.gate_path['flag_' + flag], jid))
 
     def set_flag(self, jid, flag, value=True):
         """
         Set job boolean flag. Can be used to mark job for future actions.
 
         :param jid: Job ID,
-        :param flag: Name of the flag. Allowed values: stop, delete
+        :param flag: Name of the flag. Allowed values: stop, delete,
+          wait_input, wait_quota, old_api
         :param value: of the flag (True or False)
+        :throws:
         """
-        _flags = ("stop", "delete")
+        _flags = ("stop", "delete", "wait_quota", "wait_input", "old_api")
         if flag not in _flags:
             raise Exception("Unknown flag: %s" % flag)
 
-        _path = os.path.join(conf.gate_path[flag], jid)
+        # Flags are stored in sepearate directories with names prefixed by
+        # "flag_"
+        _path = os.path.join(conf.gate_path['flag_' + flag], jid)
         if value:
             # Mark new state in the shared file system
             os.symlink(
@@ -757,15 +818,49 @@ class StateManager(object):
                 _path
             )
         else:
-            os.unlink(_path)
+            if os.path.exists(_path):
+                os.unlink(_path)
+
+    def remove_flags(self, flag, service='all'):
+        """
+        Clear flags for jobs that belong to selected service.
+
+        :param flag: The flag to clear.
+        :param service: Name of the affected service. If equals to "all" flag
+          is cleared for every job.
+        :throws:
+        """
+        # Input validation
+        if service != 'all' or service not in ServiceStore.keys():
+            raise Exception("@StateManager - Unknown service %s." % service)
+
+        _flags = ("stop", "delete", "wait_quota", "wait_input", "old_api")
+        if flag not in _flags:
+            raise Exception("Unknown flag: %s" % flag)
+
+        # Flags are stored in sepearate directories with names prefixed by
+        # "flag_"
+        _dir_name = conf.gate_path['flag_' + flag]
+        _list = os.listdir(_dir_name)
+        for _job in _list:
+            # Recognise the service name from Job ID
+            if service != 'all' and not _job.startswith(service):
+                continue
+            # Remove the flag
+            os.unlink(os.path.join(_dir_name, _job))
 
     def delete_job(self, jid):
+        '''
+        Remove all job persistant data. Except for the output directory.
+
+        :param jid: Job ID
+        :throws:
+        '''
         # Remove job symlinks
         for _state, _path in conf.gate_path.items():
             _name = os.path.join(_path, jid)
             if os.path.exists(_name):
                 os.unlink(_name)
-        # @TODO Remove time stamps
         # Remove job file after symlinks (otherwise os.path.exists
         # fails on symlinks)
         os.unlink(os.path.join(conf.gate_path_jobs, jid))
@@ -773,6 +868,18 @@ class StateManager(object):
         _name = os.path.join(conf.gate_path_exit, jid)
         if os.path.exists(_name):
             os.unlink(_name)
+        # Remove time stamps
+        _list = os.listdir(conf.gate_path_time)
+        for _item in _list:
+            if _item.endswith(jid):
+                _name = os.path.join(conf.gate_path_time, _item)
+                os.unlink(_name)
+        # Remove persistent data
+        _list = os.listdir(conf.gate_path_opts)
+        for _item in _list:
+            if _item.endswith(jid):
+                _name = os.path.join(conf.gate_path_opts, _item)
+                os.unlink(_name)
 
         # Remove job from the list
         del JobStore[jid]
