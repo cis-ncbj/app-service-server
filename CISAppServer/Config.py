@@ -167,8 +167,12 @@ class Config(dict):
         #: Valid job states as well as names of directories on shared storage
         #: that are used to monitor job states
         self.service_states = (
-            'waiting', 'queued', 'running', 'closing', 'cleanup',
+            'new', 'waiting', 'queued', 'running', 'closing', 'cleanup',
             'done', 'failed', 'aborted', 'killed',
+        )
+        #: Valid job flags
+        gelf.service_flags = (
+            "stop", "delete", "wait_quota", "wait_input", "old_api"
         )
         #: Allowed sections in job submission JSON
         self.service_allowed_sections = ('service', 'api', 'input', 'chain')
@@ -213,6 +217,8 @@ class Config(dict):
         self.gate_path_opts = None
         #: Path where job timestamps are stored
         self.gate_path_time = None
+        #: Path where new jobs are symlinked
+        self.gate_path_new = None
         #: Path where waiting jobs are symlinked
         self.gate_path_waiting = None
         #: Path where queued jobs are symlinked
@@ -239,6 +245,7 @@ class Config(dict):
         self.gate_path_flag_wait_input = None
         self.gate_path_flag_old_api = None
         self.gate_path = {
+            "new": None,
             "waiting": None,
             "queued": None,
             "running": None,
@@ -325,6 +332,7 @@ class Config(dict):
             os.path.join(self.gate_path_flags, 'old_api')
 
         # Generate job state subdirs
+        self.gate_path_new = os.path.join(self.gate_path_shared, 'new')
         self.gate_path_waiting = os.path.join(self.gate_path_shared, 'waiting')
         self.gate_path_queued = os.path.join(self.gate_path_shared, 'queued')
         self.gate_path_running = os.path.join(self.gate_path_shared, 'running')
@@ -335,6 +343,7 @@ class Config(dict):
         self.gate_path_aborted = os.path.join(self.gate_path_shared, 'aborted')
         self.gate_path_killed = os.path.join(self.gate_path_shared, 'killed')
         self.gate_path = {
+            "new": self.gate_path_new,
             "waiting": self.gate_path_waiting,
             "queued": self.gate_path_queued,
             "running": self.gate_path_running,
@@ -367,6 +376,7 @@ class Config(dict):
             "gate_path_flag_wait_quota",
             "gate_path_flag_wait_input",
             "gate_path_flag_old_api",
+            "gate_path_new",
             "gate_path_waiting",
             "gate_path_queued",
             "gate_path_running",

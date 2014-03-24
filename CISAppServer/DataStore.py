@@ -4,6 +4,8 @@
 
 import logging
 
+from collections import OrderedDict
+
 from Config import conf, verbose
 
 logger = logging.getLogger(__name__)
@@ -153,34 +155,5 @@ class Service(dict):
 
 
 ServiceStore = {}
-
-
-class JobStore(dict):
-    def get_job_ids(self, state='all'):
-        """
-        Get IDs of existing jobs.
-
-        :param state: State of the jobs to return. Valid values:
-
-        * all
-        * waiting
-        * queued
-        * running
-        * closing
-        * cleanup
-        * done
-        * failed
-        * aborted
-        * killed
-        """
-
-        _id_list = []
-        for _id in self.keys():
-            if state == 'all' or state == self[_id].get_state():
-                _id_list.append(_id)
-
-        return _id_list
-
-JobStore = JobStore()
 
 SchedulerStore = {}
