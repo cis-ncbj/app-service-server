@@ -13,10 +13,10 @@ from datetime import datetime, timedelta
 
 from Tools import Validator, ValidatorInputFileError, ValidatorError, PbsScheduler, SshScheduler, rmtree_error
 from Config import conf, verbose, ExitCodes
-from Jobs import Job, StateManager
-from DataStore import ServiceStore, JobStore, SchedulerStore
+from Jobs import Job, JobState, StateManager
+from DataStore import ServiceStore, SchedulerStore
 
-version = "0.5"
+version = "0.9"
 
 logger = logging.getLogger(__name__)
 
@@ -542,7 +542,7 @@ class JobManager(object):
             self.__thread_list.remove(_thread)
             logger.debug("@JManager - Removed finished cleanup thread.")
 
-        for _job in JobStore.values():
+        for _job in StateManager.get_job_list():
             _state = _job.get_state()
             if _state in ('done', 'failed', 'aborted', 'killed'):
                 continue

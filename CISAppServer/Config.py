@@ -171,7 +171,7 @@ class Config(dict):
             'done', 'failed', 'aborted', 'killed',
         )
         #: Valid job flags
-        gelf.service_flags = (
+        self.service_flags = (
             "stop", "delete", "wait_quota", "wait_input", "old_api"
         )
         #: Allowed sections in job submission JSON
@@ -299,8 +299,10 @@ class Config(dict):
             self.log_config['handlers']['file']['filename'] = \
                 self.log_output
         if not self.log_email:
-            del self.log_config['handlers']['mail']
-            self.log_config['root']['handlers'].remove('mail')
+            if 'mail' in self.log_config['handlers'].keys():
+                del self.log_config['handlers']['mail']
+            if 'mail' in self.log_config['root']['handlers']:
+                self.log_config['root']['handlers'].remove('mail')
         else:
             self.log_config['handlers']['mail']['toaddrs'] = self.log_email
 
@@ -361,7 +363,7 @@ class Config(dict):
         }
 
         # Create those paths if they do not exist
-        _mkdirs = (
+        _mkdirs = [
             "daemon_path_workdir",
             "gate_path_shared",
             "gate_path_output",
@@ -386,7 +388,7 @@ class Config(dict):
             "gate_path_failed",
             "gate_path_aborted",
             "gate_path_killed",
-        )
+        ]
         if 'pbs' in self.config_schedulers:
             _mkdirs.extend(("pbs_path_queue", "pbs_path_work"))
         if 'ssh' in self.config_schedulers:

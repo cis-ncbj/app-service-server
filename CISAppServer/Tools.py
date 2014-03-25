@@ -23,8 +23,8 @@ from subprocess import Popen, PIPE, STDOUT
 from yapsy.PluginManager import PluginManager
 
 from Config import conf, verbose, ExitCodes
-from DataStore import Service, ServiceStore, JobStore
-from Jobs import StateManager
+from DataStore import Service, ServiceStore
+from Jobs import JobState, StateManager
 
 logger = logging.getLogger(__name__)
 
@@ -493,9 +493,10 @@ class Validator(object):
         return True
 
     def validate_chain(self, chain):
+        _finished = (_j.id() for _j in StateManager.get_job_list('done'))
         for _id in chain:
             # ID of type string check if it is listed among finished jobs
-            if not _id in JobStore.get_job_ids('done'):
+            if not _id in _finished:
                 logger.warning(
                     "@Validator - Job %s did not finish or does not exist. "
                     "Unable to chain output." %

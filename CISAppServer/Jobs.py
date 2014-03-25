@@ -11,10 +11,13 @@ from subprocess import Popen, PIPE, STDOUT
 from datetime import datetime
 
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import Column, Integer, String, DateTime, PickleType
+from sqlalchemy.ext.mutable import Mutable
+from sqlalchemy import orm, event, create_engine
+from sqlalchemy.orm import relationship, backref, sessionmaker
+from sqlalchemy import Column, Integer, String, DateTime, PickleType, ForeignKey
 
 from Config import conf, verbose, ExitCodes
-from DataStore import JobStore, SchedulerStore, ServiceStore
+from DataStore import SchedulerStore, ServiceStore
 
 
 logger = logging.getLogger(__name__)
@@ -96,7 +99,7 @@ class JobState(Base):
     # Flag values
     FLAG_DELETE, FLAG_STOP, FLAG_WAIT_QUOTA, FLAG_WAIT_INPUT, FLAG_OLD_API, \
         FLAG_ALL = \
-        (1<<x for x in range(0,5))
+        (1<<x for x in range(0,6))
     FLAG_ALL -= 1
     #: Job flags: delete, stop, wait_quita, wait_input, old_api
     flags = Column(Integer)
@@ -105,7 +108,7 @@ class JobState(Base):
     D_ID, D_SERVICE, D_SCHEDULER, D_STATE, D_EXIT_MESSAGE, D_EXIT_STATE, D_EXIT_CODE, \
         D_SUBMIT_TIME, D_START_TIME, D_STOP_TIME, D_WAIT_TIME, D_FLAGS, \
         D_ALL = \
-        (1<<x for x in range(0,12))
+        (1<<x for x in range(0,13))
     D_ALL -= 1
 
     def __init__(self, id, service=None, scheduler=None, state=None, exit_message=None,
@@ -222,7 +225,7 @@ class JobChain(Base):
     #: Foreign key (links to Job)
     job_key = Column(Integer, ForeignKey('jobs.key'))
     #: Id of Job chained as input
-    id = Column(Strig)
+    id = Column(String)
 
 
 class SchedulerQueue(Base):
@@ -294,7 +297,7 @@ class Job(Base):
         if job_state is None:
             job_state = JobState(job_id)
         elif job_state.id != job_id:
-            raise Exception("Inconsistent job IDs: %s != %s" % (job_state.id, job_id)
+            raise Exception("Inconsistent job IDs: %s != %s" % (job_state.id, job_id))
         if not isinstance(job_state, JobState):
             raise Exception("Unknown JobState type: %s." % type(job_state))
         self.status = job_state
@@ -581,12 +584,15 @@ class StateManager(object):
     """
 
     def __init__(self):        
-        engine = create_engine('sqlite:///:memory:', echo=True)
+        #engine = create_engine('sqlite:///:memory:', echo=True)
+        engine = create_engine('sqlite:///:memory:')
         engine.execute('pragma foreign_keys=on')
         Session = sessionmaker()
         Session.configure(bind=engine)
         #: DB session handle
         self.session = Session()
+        #TODO what if the DB exists?
+	Base.metadata.create_all(engine)
 
     def commit(self):
         self.session.commit()
@@ -625,10 +631,10 @@ class StateManager(object):
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s" % state)
             return
-        if service not in ServiceStore.keys():
+        if service is not None and service not in ServiceStore.keys():
             logger.error("@StateManager - Unknown service: %s" % service)
             return
-        if flag <= 0 or flag > JobState.FLAG_ALL:
+        if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return
        
@@ -637,7 +643,7 @@ class StateManager(object):
             _q = _q.filter(JobState.state == state)
         if service is not None:
             _q = _q.filter(JobState.service == service)
-        if flag in not None:
+        if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         _q = _q.order_by(JobState.submit_time)
         return _q.all()
@@ -658,10 +664,10 @@ class StateManager(object):
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s" % state)
             return _job_count
-        if service not in ServiceStore.keys():
+        if service is not None and service not in ServiceStore.keys():
             logger.error("@StateManager - Unknown service: %s" % service)
             return _job_count
-        if flag <= 0 or flag > JobState.FLAG_ALL:
+        if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return _job_count
        
@@ -670,7 +676,7 @@ class StateManager(object):
             _q = _q.filter(JobState.state == state)
         if service is not None:
             _q = _q.filter(JobState.service == service)
-        if flag in not None:
+        if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         try:
 	    return _q.count()
@@ -696,10 +702,10 @@ class StateManager(object):
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s" % state)
             return
-        if service not in ServiceStore.keys():
+        if service is not None and service not in ServiceStore.keys():
             logger.error("@StateManager - Unknown service: %s" % service)
             return
-        if flag <= 0 or flag > JobState.FLAG_ALL:
+        if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return
        
@@ -709,7 +715,7 @@ class StateManager(object):
             _q = _q.filter(JobState.state == state)
         if service is not None:
             _q = _q.filter(JobState.service == service)
-        if flag in not None:
+        if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         _q = _q.order_by(JobState.submit_time)
 	return _q.all()
@@ -733,10 +739,10 @@ class StateManager(object):
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s" % state)
             return _job_count
-        if service not in ServiceStore.keys():
+        if service is not None and service not in ServiceStore.keys():
             logger.error("@StateManager - Unknown service: %s" % service)
             return _job_count
-        if flag <= 0 or flag > JobState.FLAG_ALL:
+        if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return _job_count
        
@@ -746,7 +752,7 @@ class StateManager(object):
             _q = _q.filter(JobState.state == state)
         if service is not None:
             _q = _q.filter(JobState.service == service)
-        if flag in not None:
+        if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         try:
 	    return _q.count()
@@ -764,7 +770,7 @@ class StateManager(object):
         :throws:
         """
         # Input validation
-        if service != 'all' or service not in ServiceStore.keys():
+        if service != 'all' and service not in ServiceStore.keys():
             raise Exception("@StateManager - Unknown service %s." % service)
         if flag <= 0 or flag > JobState.FLAG_ALL:
             raise Exception("Unknown flag: %s" % flag)
@@ -795,6 +801,7 @@ class FileStateManager(StateManager):
 
     def get_new_job_list(self):
         _jobs = []
+        _path = conf.gate_path_new
         try:
             _list = os.listdir(_path)
         except:
