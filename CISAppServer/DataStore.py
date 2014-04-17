@@ -72,12 +72,12 @@ class Service(dict):
 
         :param job: :py:class:`Job` instance
         """
-        if job.id in self.__job_proxies:
-            logger.error("@Service - Job proxy already exists: %s" % job.id)
+        if job.id() in self.__job_proxies:
+            logger.error("@Service - Job proxy already exists: %s" % job.id())
             return
 
         self.current_size += self.config['job_size']
-        self.__job_proxies.append(job.id)
+        self.__job_proxies.append(job.id())
         verbose("@Service - Allocated %s MB for job proxy (%s)." %
                 ((self.config['job_size']/1000000), self.name))
 
@@ -89,8 +89,8 @@ class Service(dict):
 
         :param job: :py:class:`Job` instance
         """
-        if job.id in self.__job_proxies:
-            self.__job_proxies.remove(job.id)
+        if job.id() in self.__job_proxies:
+            self.__job_proxies.remove(job.id())
             self.current_size -= job.get_size()
 
         verbose("@Service - Reclaimed %s MB of storage from soft "
@@ -104,17 +104,17 @@ class Service(dict):
         :param job: :py:class:`Job` instance
         """
         _change = 0
-        if job.id in self.__jobs:
+        if job.id() in self.__jobs:
             _change -= job.get_size()
             self.current_size -= job.get_size()
             self.real_size -= job.get_size()
         else:
-            self.__jobs.append(job.id)
-            if job.id in self.__job_proxies:
+            self.__jobs.append(job.id())
+            if job.id() in self.__job_proxies:
                 _change -= self.config['job_size']
                 self.current_size -= self.config['job_size']
             else:
-                self.__job_proxies.append(job.id)
+                self.__job_proxies.append(job.id())
         job.calculate_size()
         _change += job.get_size()
         self.current_size += job.get_size()
@@ -128,13 +128,13 @@ class Service(dict):
 
         :param job: :py:class:`Job` instance
         """
-        if job.id not in self.__jobs:
-            logger.error("@Service - Job does not exist: %s" % job.id)
+        if job.id() not in self.__jobs:
+            logger.error("@Service - Job does not exist: %s" % job.id())
             return
-        if job.id in self.__job_proxies:
-            self.__job_proxies.remove(job.id)
+        if job.id() in self.__job_proxies:
+            self.__job_proxies.remove(job.id())
             self.current_size -= job.get_size()
-        self.__jobs.remove(job.id)
+        self.__jobs.remove(job.id())
         self.real_size -= job.get_size()
         verbose("@Service - Reclaimed %s MB of storage (%s)." %
                 ((job.get_size()/1000000), self.name))

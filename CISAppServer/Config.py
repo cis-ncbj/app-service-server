@@ -84,6 +84,8 @@ class Config(dict):
         self.config_wait_time = 120
         #: Enabled schedulers
         self.config_schedulers = ('pbs', 'ssh')
+        #: Default scheduler can be overriden per service
+        self.config_default_scheduler = 'ssh'
         #: Maximum number of all active jobs
         self.config_max_jobs = 1000
         #: Daemon mode pid file path
@@ -211,8 +213,6 @@ class Config(dict):
         self.gate_path_dump = 'Dump'
         #: Path where jobs description is stored
         self.gate_path_jobs = None
-        #: Path where jobs exit status is stored
-        self.gate_path_exit = None
         #: Path where jobs internal state is stored
         self.gate_path_opts = None
         #: Path where job timestamps are stored
@@ -318,7 +318,6 @@ class Config(dict):
 
         # Generate subdir names
         self.gate_path_jobs = os.path.join(self.gate_path_shared, 'jobs')
-        self.gate_path_exit = os.path.join(self.gate_path_shared, 'exit')
         self.gate_path_opts = os.path.join(self.gate_path_shared, 'opts')
         self.gate_path_time = os.path.join(self.gate_path_shared, 'time')
         self.gate_path_flags = os.path.join(self.gate_path_shared, 'flags')
@@ -369,7 +368,6 @@ class Config(dict):
             "gate_path_output",
             "gate_path_dump",
             "gate_path_jobs",
-            "gate_path_exit",
             "gate_path_opts",
             "gate_path_time",
             "gate_path_flags",

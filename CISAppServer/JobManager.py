@@ -72,7 +72,7 @@ class JobManager(object):
 
         verbose('@JManager - Check for new jobs.')
 
-        _now = datetime.now()
+        _now = datetime.utcnow()
         # Wait timeout
         _dt = timedelta(seconds=conf.config_wait_time)
         # Max wait timeout for job submission (e.g. for input upload)
@@ -141,7 +141,8 @@ class JobManager(object):
             except ValidatorInputFileError as e:
                 # The input file is not available yet. Flag the job to wait.
                 _job.set_flag(JobState.FLAG_WAIT_INPUT)
-                _job.status.wait_time = datetime.now()
+                _job.status.wait_time = datetime.utcnow()
+                verbose('@JManager - Job flagged to wait for input.')
                 continue
             except ValidatorError as e:
                 _job.die("@JManager - Job %s validation failed." % _job.id(),
@@ -151,7 +152,6 @@ class JobManager(object):
                 _job.die("@JManager - Job %s validation failed." % _job.id(),
                          exc_info=True, exit_code=ExitCodes.Validate)
                 continue
-            verbose('@JManager - Check for new jobs.')
 
             # Check the service quota
             _service_name = _job.status.service
@@ -178,7 +178,7 @@ class JobManager(object):
                     self.__w_counter_quota[_service_name] = 0
                 # Flag the job to wait (no need to check the quota every tick)
                 _job.set_flag(JobState.FLAG_WAIT_QUOTA)
-                _job.status.wait_time = datetime.now()
+                _job.status.wait_time = datetime.utcnow()
                 continue
             else:
                 self.__last_service_size[_service_name] = \
@@ -250,16 +250,22 @@ class JobManager(object):
             try:
                 # Mark job as in cleanup state
                 _job.cleanup()
+                StateManager.commit()
+                # Create thread local DB session
+                # Move the job to the thread local DB session
+                #StateManager.detach_job(_job)
+                #StateManager.attach_job(_job, _session)
+                #_job = StateManager.get_job(_job.id(), _session)
                 if _job.get_exit_state() == 'aborted':
                     _thread = threading.Thread(
-                        target=_scheduler.abort, args=(_job,))
+                        target=_scheduler.abort, args=(_job.id(),))
                     _thread.start()
                     self.__thread_list.append(_thread)
                     logger.debug("@JManager - Abort cleanup thread started "
                                  "for job %s" % _job.id())
                 else:
                     _thread = threading.Thread(
-                        target=_scheduler.finalise, args=(_job,))
+                        target=_scheduler.finalise, args=(_job.id(),))
                     _thread.start()
                     self.__thread_list.append(_thread)
                     logger.debug("@JManager - Finalise cleanup thread started "
@@ -363,7 +369,7 @@ class JobManager(object):
                 continue
 
             _state = _job.get_state()
-            _now = datetime.now()
+            _now = datetime.utcnow()
             _dt = timedelta(hours=_delete_dt)
             _path_time = None
             try:
@@ -394,11 +400,37 @@ class JobManager(object):
                             "Sheduling for removal.")
                 _job.delete()
 
+    def report_jobs(self):
+        """
+        """
+
+        _waiting = StateManager.get_job_count('waiting')
+        _queued = StateManager.get_job_count('queued')
+        _running = StateManager.get_job_count('running')
+        _closing = StateManager.get_job_count('closing')
+        _cleanup = StateManager.get_job_count('cleanup')
+        _done = StateManager.get_job_count('done')
+        _failed = StateManager.get_job_count('failed')
+        _aborted = StateManager.get_job_count('aborted')
+        _killed = StateManager.get_job_count('killed')
+
+        logger.debug("Jobs - w:%s, q:%s, r:%s, s:%s, c:%s, d:%s, f:%s, a:%s, "
+                "k:%s." % (_waiting, _queued, _running, _closing, _cleanup,
+                    _done, _failed, _aborted, _killed))
+
+    def check_finished_threads(self):
+        """Check for cleanup threads that finished execution.
+
+        If found finalise them."""
+
+        verbose('@JManager - Check for finished cleanup threads.')
+
         # Remove finished threads
         for _thread in self.__thread_list:
             if not _thread.is_alive():
                 _thread.join()
                 self.__thread_list.remove(_thread)
+                StateManager.expire_session()
                 logger.debug("@JManager - Removed finished cleanup thread.")
 
     def collect_garbage(self, service, full=False):
@@ -437,7 +469,7 @@ class JobManager(object):
             _protect_dt = _service.config['min_lifetime']
             _dt = timedelta(hours=_protect_dt)
             _state = _job.get_state()
-            _now = datetime.now()
+            _now = datetime.utcnow()
             try:
                 # We consider only jobs that could have produced output
                 if _state in ['done', 'failed', 'killed', 'aborted']:
@@ -540,6 +572,7 @@ class JobManager(object):
             # @TODO Kill the thread
             _thread.join()
             self.__thread_list.remove(_thread)
+            StateManager.expire_session()
             logger.debug("@JManager - Removed finished cleanup thread.")
 
         for _job in StateManager.get_job_list():
@@ -585,7 +618,9 @@ class JobManager(object):
                 for _service in ServiceStore.keys():
                     self.collect_garbage(_service)
                 self.check_old_jobs()
+                self.report_jobs()
                 _n = 0
+            self.check_finished_threads()
             self.check_deleted_jobs()
             StateManager.commit()
             _n += 1

@@ -24,7 +24,7 @@ from yapsy.PluginManager import PluginManager
 
 from Config import conf, verbose, ExitCodes
 from DataStore import Service, ServiceStore
-from Jobs import JobState, StateManager
+from Jobs import JobData, JobState, JobChain, StateManager, SchedulerQueue
 
 logger = logging.getLogger(__name__)
 
@@ -127,12 +127,13 @@ class Validator(object):
 
         # Make sure job.service is defined
 	job.status.service = 'default'
+        job.status.scheduler = conf.config_default_scheduler
 
         # Load job file from jobs directory
         _name = os.path.join(conf.gate_path_jobs, job.id())
         with open(_name) as _f:
             _data = json.load(_f)
-        logger.debug(u'@Job - Loaded data file %s.' % self.id)
+        logger.debug(u'@Job - Loaded data file %s.' % job.id())
         logger.debug(_data)
 
         # Check if data contains service attribute and that such service was
@@ -257,7 +258,7 @@ class Validator(object):
                 _chain = []
                 # Generate keywords for script substitutions
                 _i = 0
-                for _id in _chain:
+                for _id in _data['chain']:
                     _variables["CIS_CHAIN%s" % _i] = _id
                     _i += 1
                     _chain.append(JobChain(id=_id))
@@ -570,7 +571,7 @@ class Scheduler(object):
         """Stop running job and remove it from execution queue."""
         raise NotImplementedError
 
-    def finalise(self, job):
+    def finalise(self, jid):
         """
         Prepare output of finished job.
 
@@ -579,13 +580,22 @@ class Scheduler(object):
         :param job: :py:class:`Job` instance
         """
 
-        logger.debug("@Scheduler - Retrive job output: %s" % job.id())
-        _work_dir = os.path.join(self.work_path, job.id())
+        _clean = True
+
+        logger.debug("@Scheduler - Retrive job output: %s" % jid)
+        _work_dir = os.path.join(self.work_path, jid)
+
+        try:
+            _session = StateManager.new_session()
+            _job = StateManager.get_job(jid, _session)
+        except:
+            logger.error("@Scheduler - Unable to connect to DB.",
+                         exc_info=True)
+            raise
 
         # Cleanup of the output
         try:
-            job.scheduler = None
-            for _chain in job.chain:
+            for _chain in _job.chain:
                 shutil.rmtree(os.path.join(_work_dir, _chain.id),
                               ignore_errors=True)
         except:
@@ -595,8 +605,8 @@ class Scheduler(object):
         if os.path.isdir(_work_dir):
             try:
                 # Remove output dir if it exists.
-                _out_dir = os.path.join(conf.gate_path_output, job.id())
-                _dump_dir = os.path.join(conf.gate_path_dump, job.id())
+                _out_dir = os.path.join(conf.gate_path_output, jid)
+                _dump_dir = os.path.join(conf.gate_path_dump, jid)
                 if os.path.isdir(_out_dir):
                     logger.debug('@Scheduler - Remove existing output directory')
                     # out and dump should be on the same partition so that rename
@@ -625,16 +635,40 @@ class Scheduler(object):
                         os.chmod(_name, os.stat(_name).st_mode |
                                  stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
             except:
-                job.die("@Scheduler - Unable to retrive job output directory %s" %
+                _job.die("@Scheduler - Unable to retrive job output directory %s" %
                         _work_dir, exc_info=True)
-                return
+                _clean = False
 
-        # Update service quota
-        ServiceStore[job.service].update_job(job)
-        # Set job exit state
-        job.exit()
+        if not _clean:
+            try:
+                StateManager.commit(_session)
+                _session.close()
+            except:
+                logger.error("@Scheduler - Unable to finalize session.",
+                             exc_info=True)
+            return
 
-    def abort(self, job):
+        # Remove job from scheduler queue if it was queued
+        try:
+            _job.scheduler = None
+        except:
+            logger.error("@Scheduler - Unable to remove job SchedulerQueue.",
+                         exc_info=True)
+
+        try:
+            # Update service quota
+            ServiceStore[_job.status.service].update_job(_job)
+            # Set job exit state
+            _job.exit()
+
+            StateManager.commit(_session)
+            _session.close()
+        except:
+            logger.error("@Scheduler - Unable to finalize cleanup.",
+                         exc_info=True)
+        logger.debug("@Scheduler - job finalised: %s" % jid)
+
+    def abort(self, jid):
         """
         Cleanup aborted job.
 
@@ -643,13 +677,11 @@ class Scheduler(object):
         :param job: :py:class:`Job` instance
         """
 
-        logger.debug("@Scheduler - Cleanup job: %s" % job.id())
+        logger.debug("@Scheduler - Cleanup job: %s" % jid)
 
-        _work_dir = os.path.join(self.work_path, job.id())
-        _out_dir = os.path.join(conf.gate_path_output, job.id())
-
-        # Remove job from scheduler queue if it was queued
-	job.scheduler = None
+        _work_dir = os.path.join(self.work_path, jid)
+        _out_dir = os.path.join(conf.gate_path_output, jid)
+        _clean = True
 
         # Remove output dir if it exists.
         if os.path.isdir(_out_dir):
@@ -661,18 +693,46 @@ class Scheduler(object):
             shutil.rmtree(_work_dir, ignore_errors=True)
 
         if os.path.isdir(_out_dir):
+            _clean = False
             logger.error("@Scheduler - Unable to remove job output directory: "
-                         "%s" % job.id(), exc_info=True)
-        if os.path.isdir(_out_dir):
+                         "%s" % jid, exc_info=True)
+        if os.path.isdir(_work_dir):
+            _clean = False
             logger.error("@Scheduler - Unable to remove job working "
-                         "directory: %s" % job.id(), exc_info=True)
-        else:
-            logger.info("Job %s cleaned." % job.id())
+                         "directory: %s" % jid, exc_info=True)
+        if _clean:
+            logger.info("Job %s cleaned directories." % jid)
 
-        # Update service quota
-        ServiceStore[job.service].update_job(job)
-        # Set job exit state
-        job.exit()
+        try:
+            _session = StateManager.new_session()
+            _job = StateManager.get_job(jid, _session)
+        except:
+            logger.error("@Scheduler - Unable to connect to DB.",
+                         exc_info=True)
+            if _session is not None:
+                _session.close()
+            return
+
+        # Remove job from scheduler queue if it was queued
+        try:
+            _job.scheduler = None
+        except:
+            logger.error("@Scheduler - Unable to remove job SchedulerQueue.",
+                         exc_info=True)
+
+        logger.debug("@Scheduler - finalize cleanup: %s" % jid)
+        try:
+            # Update service quota
+            ServiceStore[_job.status.service].update_job(_job)
+            # Set job exit state
+            _job.exit()
+
+            StateManager.commit(_session)
+            _session.close()
+        except:
+            logger.error("@Scheduler - Unable to finalize cleanup.",
+                         exc_info=True)
+        logger.debug("@Scheduler - job abort finished: %s" % jid)
 
     def generate_scripts(self, job):
         """
@@ -688,7 +748,7 @@ class Scheduler(object):
         """
 
         # Input directory
-        _script_dir = os.path.join(conf.service_path_data, job.service)
+        _script_dir = os.path.join(conf.service_path_data, job.status.service)
         # Output directory
         _work_dir = os.path.join(self.work_path, job.id())
 
@@ -1006,7 +1066,7 @@ class PbsScheduler(Scheduler):
 
         # Iterate through jobs
         for _job in jobs:
-            _pbs_id = job.scheduler.id
+            _pbs_id = str(job.scheduler.id)
             # Check if the job exists in the PBS
             if _pbs_id not in _job_states.keys():
                 _job.die('@PBS - Job does not exist in the PBS')
@@ -1074,7 +1134,7 @@ class PbsScheduler(Scheduler):
         # @TODO move to state manager
         # Get Job PBS ID
         try:
-            _pbs_id = job.scheduler.id
+            _pbs_id = str(job.scheduler.id)
         except:
             job.die('@PBS - Unable to read PBS job ID', exc_info=True)
             return
@@ -1159,7 +1219,7 @@ class SshScheduler(Scheduler):
             # Submit
             logger.debug("@SSH - Submitting new job")
             # Run qsub with proper user permissions
-            _user = ServiceStore[job.service].config['username']
+            _user = ServiceStore[job.status.service].config['username']
             _shsub = os.path.join(os.path.dirname(conf.daemon_path_installdir),
                                   "Scripts")
             _shsub = os.path.join(_shsub, "shsub")
@@ -1205,7 +1265,7 @@ class SshScheduler(Scheduler):
             _usr = _service.config['username']
             if _usr not in _users.keys():
                 _users[_usr] = []
-            _queue = job.scheduler.queue
+            _queue = _job.scheduler.queue
             if _queue not in _users[_usr]:
                 _users[_usr].append(_queue)
 
@@ -1252,7 +1312,7 @@ class SshScheduler(Scheduler):
 
         # Iterate through jobs
         for _job in jobs:
-            _pid = _job.scheduler.id
+            _pid = str(_job.scheduler.id)
             # Check if the job exists on a SSH execution host
             if _pid not in _job_states.keys():
                 _job.die('@SSH - Job does not exist on any of the SSH '
@@ -1305,7 +1365,7 @@ class SshScheduler(Scheduler):
 
         # Get Job PID
         try:
-            _pid = job.scheduler.id
+            _pid = str(job.scheduler.id)
         except:
             job.die('@SSH - Unable to read PID', exc_info=True)
             return

@@ -74,7 +74,7 @@ class JobState(Base):
     #: Foreign key (links to Job)
     #job_key = Column(Integer)
     #: Job unique identifier
-    id = Column(String)
+    id = Column(String, unique=True)
     #: Jobs' Service
     service = Column(String)
     #: Jobs' Scheduler
@@ -110,10 +110,13 @@ class JobState(Base):
         D_ALL = \
         (1<<x for x in range(0,13))
     D_ALL -= 1
+    dirty = Column(Integer)
 
     def __init__(self, id, service=None, scheduler=None, state=None, exit_message=None,
                  exit_state=None, exit_code=None, submit_time=None, start_time=None,
                  stop_time=None, wait_time=None, flags=0):
+        #: Dirty flags
+        self.dirty = 0
         self.id = id
         self.service = service
         self.scheduler = scheduler
@@ -126,7 +129,7 @@ class JobState(Base):
         self.stop_time = stop_time
         self.wait_time = wait_time
         self.flags = flags
-        #: Dirty flags
+        # Reset dirty flags
         self.dirty = 0
 
     # Initialize of load from DB
@@ -194,6 +197,11 @@ def set_job_state_wait_time(target, value, oldvalue, initiator):
 @event.listens_for(JobState.flags, 'set')
 def set_job_state_flags(target, value, oldvalue, initiator):
     target.dirty |= target.D_FLAGS
+
+
+@event.listens_for(JobState, 'after_delete')
+def delete_job_state(mapper, connection, target):
+    StateManager.cleanup(target)
 
 
 class JobData(Base):
@@ -278,13 +286,13 @@ class Job(Base):
     #status = relationship("JobState", uselist=False, backref='jobs', cascade="all, delete, delete-orphan",
     #                      primaryjoin='Job.key==JobState.job_key', foreign_keys='JobState.job_key')
     status_key = Column(Integer, ForeignKey('job_states.key'))
-    status = relationship("JobState", backref=backref('jobs', uselist=False), cascade="all, delete, delete-orphan", single_parent=True)
+    status = relationship("JobState", backref=backref('jobs', uselist=False), cascade="all, delete-orphan", single_parent=True)
     #: Job parameters after validation
-    valid_data = relationship("JobData", uselist=False, backref='jobs', cascade="all, delete, delete-orphan", single_parent=True)
+    data = relationship("JobData", uselist=False, backref='jobs', cascade="all, delete-orphan", single_parent=True)
     #: Stores scheduler related info for jobs that were passed to the scheduler 
-    scheduler = relationship("SchedulerQueue", uselist=False, backref='jobs', cascade="all, delete, delete-orphan", single_parent=True)
+    scheduler = relationship("SchedulerQueue", uselist=False, backref='jobs', cascade="all, delete-orphan", single_parent=True)
     #: List of job IDs whose output we would like to consume (job chaining)
-    chain = relationship("JobChain", backref='jobs', cascade="all, delete, delete-orphan", single_parent=True)
+    chain = relationship("JobChain", backref='jobs', cascade="all, delete-orphan", single_parent=True)
 
     def __init__(self, job_id, job_state=None):
         """
@@ -304,7 +312,7 @@ class Job(Base):
         self.size = 0  # Job output size in bytes
         self.status.exit_code = ExitCodes.Undefined  # Job exit code
         self.status.state = 'waiting'
-        self.status.submit_time = datetime.now()
+        self.status.submit_time = datetime.utcnow()
 
     def id(self):
         return self.status.id
@@ -376,7 +384,7 @@ class Job(Base):
     def run(self):
         """ Mark job as running. """
         self.__set_state('running')
-        self.status.start_time = datetime.now()
+        self.status.start_time = datetime.utcnow()
 
     def cleanup(self):
         """ Mark job as in cleanup state. """
@@ -449,6 +457,7 @@ class Job(Base):
         called.
         """
 
+        verbose("@Job - Finish job %s." % self.id())
         if self.status.exit_state is None:
             self.die("@Job - Exit status is not defined for job %s." %
                      self.id())
@@ -464,7 +473,7 @@ class Job(Base):
 
         # Store stop time
         try:
-            self.status.stop_time = datetime.now()
+            self.status.stop_time = datetime.utcnow()
         except:
             logger.error("@Job - Cannot store job stop time.", exc_info=True)
 
@@ -487,7 +496,7 @@ class Job(Base):
             if not os.path.exists(_name):
                 self.size = 0
                 verbose("@Job - Job output size calculated: %s" %
-                        self.__size)
+                        self.size)
                 return
 
             # Use /usr/bin/du as os.walk is very slow
@@ -518,7 +527,7 @@ class Job(Base):
 
     def compact(self):
         """
-        Release resources allocated for the job (data, valid_data).
+        Release resources allocated for the job
         """
         self.data = None
 
@@ -546,6 +555,7 @@ class Job(Base):
                             (new_state, self.id()))
 
         self.status.state = new_state
+        verbose("@Job - State changed to %s(%s)." % (new_state, self.id()))
 
     def __set_exit_state(self, message, state, exit_code):
         """
@@ -573,7 +583,10 @@ class Job(Base):
                 self.status.exit_state = state
                 self.status.exit_code = exit_code
                 # Concatanate all status messages
-                self.status.exit_message += _message
+                if self.status.exit_message is not None:
+                    self.status.exit_message += _message
+                else:
+                    self.status.exit_message = _message
 
 
 class StateManager(object):
@@ -583,27 +596,66 @@ class StateManager(object):
     Default implementation uses files on shared file system.
     """
 
-    def __init__(self):        
-        #engine = create_engine('sqlite:///:memory:', echo=True)
-        engine = create_engine('sqlite:///:memory:')
-        engine.execute('pragma foreign_keys=on')
-        Session = sessionmaker()
-        Session.configure(bind=engine)
+    def __init__(self):
+        #self.engine = create_engine('sqlite:///:memory:', echo=True)
+        #engine = create_engine('sqlite:///:memory:')
+        #self.engine = create_engine('sqlite:///jobs.db', echo=True)
+        _verbose = False
+        if(conf.log_level == 'VERBOSE'):
+            _verbose = True
+        self.engine = create_engine('sqlite:///jobs.db', echo=_verbose)
+        self.engine.execute('pragma foreign_keys=on')
+        self.session_factory = sessionmaker()
+        self.session_factory.configure(bind=self.engine)
         #: DB session handle
-        self.session = Session()
+        self.session = self.session_factory()
         #TODO what if the DB exists?
-	Base.metadata.create_all(engine)
+        Base.metadata.create_all(self.engine)
 
-    def commit(self):
-        self.session.commit()
-    
+    def new_session(self):
+        return self.session_factory()
+
+    def expire_session(self, session=None):
+        if session is None:
+            session = self.session
+        session.expire_all()
+
+    def commit(self, session=None):
+        verbose("@StateManager: Commit session to DB")
+        if session is None:
+            session = self.session
+
+        try:
+            session.commit()
+        except:
+            session.rollback()
+
+    def cleanup(self, status):
+        raise NotImplementedError
+
     def new_job(self, job_id):
-	raise NotImplementedError
+        raise NotImplementedError
 
-    def add_job(self, job):
-        self.session.add(job)
+    def attach_job(self, job, session=None):
+        if session is None:
+            session = self.session
+        session.add(job)
 
-    def get_job(self, job_id):
+    def detach_job(self, job, session=None):
+        if session is None:
+            session = self.session
+        verbose("@StateManager: Will detach job %s from session." % job.id())
+        verbose("@StateManager: Dirty - %s." % session.dirty)
+        self.commit(session)
+        session.expunge(job)
+
+    def merge_job(self, job, session=None):
+        if session is None:
+            session = self.session
+        self.commit(session)
+        session.merge(job)
+
+    def get_job(self, job_id, session=None):
         """
         Get Job object from JobStore.
 
@@ -611,13 +663,15 @@ class StateManager(object):
         :return: Job object for *job_id*.
         :throws: NoResultFound exception if job_id is not recognized. 
         """
+        if session is None:
+            session = self.session
 
-        return self.session.query(Job).join(JobState).filter(JobState.id == job_id).one()
+        return session.query(Job).join(JobState).filter(JobState.id == job_id).one()
 
     def get_new_job_list(self):
-	raise NotImplementedError
+        raise NotImplementedError
 
-    def get_job_list(self, state="all", service=None, flag=None):
+    def get_job_list(self, state="all", service=None, flag=None, session=None):
         """
         Get a list of jobs that are in a selected state.
 
@@ -628,6 +682,9 @@ class StateManager(object):
 
         :return: List of Job instances sorted by submit time.
         """
+        if session is None:
+            session = self.session
+
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s" % state)
             return
@@ -638,7 +695,7 @@ class StateManager(object):
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return
        
-        _q = self.session.query(Job).join(JobState) 
+        _q = session.query(Job).join(JobState) 
         if state != 'all':
             _q = _q.filter(JobState.state == state)
         if service is not None:
@@ -648,7 +705,7 @@ class StateManager(object):
         _q = _q.order_by(JobState.submit_time)
         return _q.all()
 
-    def get_job_count(self, state="all", service=None, flag=None):
+    def get_job_count(self, state="all", service=None, flag=None, session=None):
         """
         Get a count of jobs that are in a selected state.
 
@@ -659,6 +716,9 @@ class StateManager(object):
 
         :return: Number of jobs in the selected state, or -1 in case of error.
         """
+        if session is None:
+            session = self.session
+
         _job_count = -1
 
         if state != 'all' and state not in conf.service_states:
@@ -671,7 +731,7 @@ class StateManager(object):
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return _job_count
        
-        _q = self.session.query(Job).join(JobState) 
+        _q = session.query(Job).join(JobState) 
         if state != 'all':
             _q = _q.filter(JobState.state == state)
         if service is not None:
@@ -684,7 +744,7 @@ class StateManager(object):
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
 
-    def get_scheduler_list(self, scheduler, state="all", service=None, flag=None):
+    def get_scheduler_list(self, scheduler, state="all", service=None, flag=None, session=None):
         """
         Get a list of jobs that are in a scheduler queue.
 
@@ -693,6 +753,9 @@ class StateManager(object):
 
         :return: List of Job instances sorted by submit time.
         """
+        if session is None:
+            session = self.session
+
 
 	if scheduler not in SchedulerStore.keys():
             logger.error(
@@ -709,7 +772,7 @@ class StateManager(object):
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return
        
-        _q = self.session.query(Job).join(JobState).join(SchedulerQueue).\
+        _q = session.query(Job).join(JobState).join(SchedulerQueue).\
                  filter(SchedulerQueue.scheduler == scheduler)
         if state != 'all':
             _q = _q.filter(JobState.state == state)
@@ -720,7 +783,7 @@ class StateManager(object):
         _q = _q.order_by(JobState.submit_time)
 	return _q.all()
 
-    def get_scheduler_count(self, scheduler, state="all", service=None, flag=None):
+    def get_scheduler_count(self, scheduler, state="all", service=None, flag=None, session=None):
         """
         Get a count jobs that are in a scheduler queue.
 
@@ -729,6 +792,9 @@ class StateManager(object):
 
         :return: Number of jobs in the scheduler queue, or -1 in case of error.
         """
+        if session is None:
+            session = self.session
+
         _job_count = -1
 
 	if scheduler not in SchedulerStore.keys():
@@ -746,7 +812,7 @@ class StateManager(object):
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return _job_count
        
-        _q = self.session.query(Job).join(JobState).join(SchedulerQueue).\
+        _q = session.query(Job).join(JobState).join(SchedulerQueue).\
                  filter(SchedulerQueue.scheduler == scheduler)
         if state != 'all':
             _q = _q.filter(JobState.state == state)
@@ -760,7 +826,7 @@ class StateManager(object):
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
 
-    def remove_flags(self, flag, service='all'):
+    def remove_flags(self, flag, service='all', session=None):
         """
         Clear flags for jobs that belong to selected service.
 
@@ -769,13 +835,16 @@ class StateManager(object):
           is cleared for every job.
         :throws:
         """
+        if session is None:
+            session = self.session
+
         # Input validation
         if service != 'all' and service not in ServiceStore.keys():
             raise Exception("@StateManager - Unknown service %s." % service)
         if flag <= 0 or flag > JobState.FLAG_ALL:
             raise Exception("Unknown flag: %s" % flag)
 
-        _q = self.session.query(Job).join(JobState)
+        _q = session.query(Job).join(JobState)
         if service != 'all':
             _q = _q.filter(JobState.service == service)
         _list = _q.all()
@@ -784,23 +853,25 @@ class StateManager(object):
         for _job in _list:
             _job.set_flag(flag, remove=True)
 
-    def delete_job(self, job):
+    def delete_job(self, job, session=None):
         '''
         Remove all job persistant data. Except for the output directory.
 
         :param jid: Job ID
         :throws:
         '''
-        self.session.delete(job)
+        if session is None:
+            session = self.session
+
+        session.delete(job)
 
 class FileStateManager(StateManager):
-    def new_job(self, jid):
+    def new_job(self, jid, session=None):
         _job = Job(jid)
-        self.add_job(_job)
+        self.attach_job(_job, session)
         return _job
 
     def get_new_job_list(self):
-        _jobs = []
         _path = conf.gate_path_new
         try:
             _list = os.listdir(_path)
@@ -809,50 +880,54 @@ class FileStateManager(StateManager):
                          _path, exc_info=True)
             return
 
+        # TODO make sure that session commit will remove the new state. Currently new jobs are considered clean ...
         for _jid in _list:
+            # Create new Job instance. It will be created in 'waiting' state
             _job = self.new_job(_jid)
             if _job is None:
                 continue
-            _jobs.append(_job)
 
-        _jobs.extend(self.get_job_list("waiting"))
+        # Get list of waiting jobs (includes new requests and request not processed yet)
+        _jobs = self.get_job_list("waiting")
+
+        verbose(u"@FileStateManager - Waiting job requests: %s" % len(_jobs))
 
         return _jobs
 
-    def commit(self):
-        for _entry in self.session.dirty:
-            if isinstance(_entry, JobState):
-                if _entry.dirty & JobState.D_SERVICE:
-                    self.__service_change(_entry)
-                if _entry.dirty & JobState.D_STATE:
-                    self.__state_change(_entry)
-                if _entry.dirty & JobState.D_EXIT_MESSAGE:
-                    self.__exit_message_change(_entry)
-                if _entry.dirty & JobState.D_EXIT_STATE:
-                    self.__exit_state_change(_entry)
-                if _entry.dirty & JobState.D_EXIT_CODE:
-                    self.__exit_code_change(_entry)
-                if _entry.dirty & JobState.D_SUBMIT_TIME:
-                    self.__submit_time_change(_entry)
-                if _entry.dirty & JobState.D_START_TIME:
-                    self.__start_time_change(_entry)
-                if _entry.dirty & JobState.D_STOP_TIME:
-                    self.__stop_time_change(_entry)
-                if _entry.dirty & JobState.D_WAIT_TIME:
-                    self.__wait_time_change(_entry)
-                if _entry.dirty & JobState.D_FLAGS:
-                    self.__flags_change(_entry)
-                _entry.dirty = 0
+    def commit(self, session=None):
+        verbose("@FileStateManager: Sync DB with AppGW.")
+        if session is None:
+            session = self.session
 
-        for _entry in self.session.deleted:
-            if isinstance(_entry, JobState):
-                __cleanup(_entry)
+        for _entry in session.query(JobState).filter(JobState.dirty > 0):
+            if _entry.dirty & JobState.D_SERVICE:
+                self.__service_change(_entry)
+            if _entry.dirty & JobState.D_STATE:
+                self.__state_change(_entry)
+            if _entry.dirty & JobState.D_EXIT_MESSAGE:
+                self.__exit_message_change(_entry)
+            if _entry.dirty & JobState.D_EXIT_STATE:
+                self.__exit_state_change(_entry)
+            if _entry.dirty & JobState.D_EXIT_CODE:
+                self.__exit_code_change(_entry)
+            if _entry.dirty & JobState.D_SUBMIT_TIME:
+                self.__submit_time_change(_entry)
+            if _entry.dirty & JobState.D_START_TIME:
+                self.__start_time_change(_entry)
+            if _entry.dirty & JobState.D_STOP_TIME:
+                self.__stop_time_change(_entry)
+            if _entry.dirty & JobState.D_WAIT_TIME:
+                self.__wait_time_change(_entry)
+            if _entry.dirty & JobState.D_FLAGS:
+                self.__flags_change(_entry)
+            _entry.dirty = 0
 
-        super(FileStateManager, self).commit()
+        super(FileStateManager, self).commit(session)
 
-    def __cleanup(self, status):
+    def cleanup(self, status):
         _jib = status.id
 
+        verbose("@FileStateManager: Job cleanup (%s)" % _jid)
         # Remove job symlinks
         for _state, _path in conf.gate_path.items():
             _name = os.path.join(_path, _jid)
@@ -861,10 +936,6 @@ class FileStateManager(StateManager):
         # Remove job file after symlinks (otherwise os.path.exists
         # fails on symlinks)
         os.unlink(os.path.join(conf.gate_path_jobs, _jid))
-        # Remove output status file
-        _name = os.path.join(conf.gate_path_exit, _jid)
-        if os.path.exists(_name):
-            os.unlink(_name)
         # Remove time stamps
         _list = os.listdir(conf.gate_path_time)
         for _item in _list:
@@ -885,6 +956,7 @@ class FileStateManager(StateManager):
         _jid = status.id
         _new_state = status.state
 
+        verbose("@FileStateManager: State changed to: %s (%s)" % (_new_state, _jid))
         # Mark new state in the shared file system
         os.symlink(
             os.path.join(conf.gate_path_jobs, _jid),
@@ -901,6 +973,7 @@ class FileStateManager(StateManager):
     def __exit_message_change(self, status):
         _jid = status.id
 
+        verbose("@FileStateManager: Store exit msg: %s (%s)" % (status.exit_message, _jid))
         # Store the auxiliary info into an .opt file
         _opt = os.path.join(conf.gate_path_opts, 'message_' + _jid)
         with open(_opt, 'w') as _f:
@@ -909,6 +982,7 @@ class FileStateManager(StateManager):
     def __exit_state_change(self, status):
         _jid = status.id
 
+        verbose("@FileStateManager: Store exit state: %s (%s)" % (status.exit_state, _jid))
         # Store the auxiliary info into an .opt file
         _opt = os.path.join(conf.gate_path_opts, 'state_' + _jid)
         with open(_opt, 'w') as _f:
@@ -917,52 +991,62 @@ class FileStateManager(StateManager):
     def __exit_code_change(self, status):
         _jid = status.id
 
+        verbose("@FileStateManager: Store exit code: %s (%s)" % (status.exit_code, _jid))
         # Store the auxiliary info into an .opt file
         _opt = os.path.join(conf.gate_path_opts, 'code_' + _jid)
         with open(_opt, 'w') as _f:
-            _f.write(status.exit_code)
+            _f.write("%s" % status.exit_code)
 
     def __submit_time_change(self, status):
         _jid = status.id
 
+        verbose("@FileStateManager: Submit time change: %s (%s)" % (status.submit_time, _jid))
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "submit_" + _jid)
+        _tstamp = (status.submit_time - datetime(1970,1,1)).total_seconds()
         with file(_fname, 'a'):
-            os.utime(_fname, time_stamp)
+            os.utime(_fname, (_tstamp, _tstamp))
 
     def __start_time_change(self, status):
         _jid = status.id
 
+        verbose("@FileStateManager: Start time change: %s (%s)" % (status.start_time, _jid))
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "start_" + _jid)
+        _tstamp = (status.start_time - datetime(1970,1,1)).total_seconds()
         with file(_fname, 'a'):
-            os.utime(_fname, time_stamp)
+            os.utime(_fname, (_tstamp, _tstamp))
 
     def __stop_time_change(self, status):
         _jid = status.id
 
+        verbose("@FileStateManager: Stop time change: %s (%s)" % (status.stop_time, _jid))
+        _tstamp = (status.stop_time - datetime(1970,1,1)).total_seconds()
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "stop_" + _jid)
         with file(_fname, 'a'):
-            os.utime(_fname, time_stamp)
+            os.utime(_fname, (_tstamp, _tstamp))
 
     def __wait_time_change(self, status):
         _jid = status.id
 
+        verbose("@FileStateManager: Wait time change: %s (%s)" % (status.wait_time, _jid))
+        _tstamp = (status.wait_time - datetime(1970,1,1)).total_seconds()
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "wait_" + _jid)
         with file(_fname, 'a'):
-            os.utime(_fname, time_stamp)
+            os.utime(_fname, (_tstamp, _tstamp))
 
     def __flags_change(self, status):
         _jid = status.id
         _flags_add = []
         _flags_remove = []
 
+        verbose("@FileStateManager: Flags change: %s (%s)" % (status.flags, _jid))
         _flag = 'flag_delete'
         if status.flags & JobState.FLAG_DELETE:
             _flags_add.append(_flag)
