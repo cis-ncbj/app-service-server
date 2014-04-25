@@ -134,7 +134,7 @@ class Validator(object):
         with open(_name) as _f:
             _data = json.load(_f)
         logger.debug(u'@Job - Loaded data file %s.' % job.id())
-        logger.debug(_data)
+        verbose(_data)
 
         # Check if data contains service attribute and that such service was
         # initialized
@@ -548,7 +548,7 @@ class Scheduler(object):
         # Output job progress log if it exists
         # The progres log is extraced every n-th status check
         if Scheduler.__progress_step >= conf.config_progress_step:
-            logger.debug("@Scheduler - Extracting progress log (%s)" % job.id())
+            verbose("@Scheduler - Extracting progress log (%s)" % job.id())
             _work_dir = os.path.join(self.work_path, job.id())
             _output_dir = os.path.join(conf.gate_path_output, job.id())
             _progress_file = os.path.join(_work_dir, 'progress.log')
@@ -557,7 +557,7 @@ class Scheduler(object):
                     if not os.path.isdir(_output_dir):
                         os.mkdir(_output_dir)
                     shutil.copy(_progress_file, _output_dir)
-                    logger.debug('@Scheduler - Progress log extracted')
+                    verbose('@Scheduler - Progress log extracted')
                 except:
                     logger.error(
                         '@Scheduler - Cannot copy progress.log',
@@ -1029,7 +1029,7 @@ class PbsScheduler(Scheduler):
         for _usr in _users:
             try:
                 # Run qstat
-                logger.debug("@PBS - Check jobs state for user %s" % _usr)
+                verbose("@PBS - Check jobs state for user %s" % _usr)
                 _opts = ["/usr/bin/qstat", "-f", "-x", "-u", _usr]
                 verbose("@PBS - Running command: %s" % str(_opts))
                 _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
@@ -1276,7 +1276,7 @@ class SshScheduler(Scheduler):
             for _queue in _queues:
                 try:
                     # Run shtat
-                    logger.debug("@SSH - Check jobs state for user %s @ %s" %
+                    verbose("@SSH - Check jobs state for user %s @ %s" %
                                  (_usr, _queue))
                     _shstat = os.path.join(
                         os.path.dirname(conf.daemon_path_installdir),

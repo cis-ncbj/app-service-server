@@ -623,4 +623,5 @@ class JobManager(object):
             self.check_finished_threads()
             self.check_deleted_jobs()
             StateManager.commit()
+            StateManager.poll_gw()
             _n += 1

@@ -22,7 +22,27 @@ from DataStore import SchedulerStore, ServiceStore
 
 logger = logging.getLogger(__name__)
 
-Base = declarative_base()
+class UnicodeBase(object):
+    """
+    This class can be used by ``declarative_base``, to add an automatic
+    ``__unicode__`` method to *all* subclasses of ``Base``. This ``__unicode__`` will
+    represent values as::
+
+        ClassName(col_1=value_1, col_2=value_2, ..., col_n=value_n)
+
+    where ``col_1..col_n`` are the columns of the mapped table with the
+    corresponding values.
+    """
+    def __unicode__(self):
+        cols = self.__table__.columns
+        items = [(_.name, getattr(self, _.name))
+                 for _ in cols]
+        return u"{0}({1})".format(
+            self.__class__.__name__,
+            u', '.join([u'{0}={1!r}'.format(*_) for _ in items]))
+
+# Base class for SQLAlchemy ORM objects
+Base = declarative_base(cls=UnicodeBase)
 
 
 class JobBadStateError(Exception):
@@ -103,6 +123,8 @@ class JobState(Base):
     FLAG_ALL -= 1
     #: Job flags: delete, stop, wait_quita, wait_input, old_api
     flags = Column(Integer)
+    #: Dirty status of job flags
+    flags_dirty = Column(Integer)
 
     # Values of dirty flags
     D_ID, D_SERVICE, D_SCHEDULER, D_STATE, D_EXIT_MESSAGE, D_EXIT_STATE, D_EXIT_CODE, \
@@ -117,6 +139,7 @@ class JobState(Base):
                  stop_time=None, wait_time=None, flags=0):
         #: Dirty flags
         self.dirty = 0
+        self.flags_dirty = 0
         self.id = id
         self.service = service
         self.scheduler = scheduler
@@ -131,11 +154,13 @@ class JobState(Base):
         self.flags = flags
         # Reset dirty flags
         self.dirty = 0
+        self.flags_dirty = 0
 
-    # Initialize of load from DB
+    # Initialize on load from DB
     @orm.reconstructor
     def init_on_load(self):
         self.dirty = 0
+        self.flags_dirty = 0
 
 # Listeners to "set" events for JobState attributes. They set dirty flags that
 # are used to sync the changes with AppGw.
@@ -156,6 +181,7 @@ def set_job_state_scheduler(target, value, oldvalue, initiator):
 
 @event.listens_for(JobState.state, 'set')
 def set_job_state_state(target, value, oldvalue, initiator):
+    verbose("@JobState - Dirty: state changed (%s => %s)" % (oldvalue, value))
     target.dirty |= target.D_STATE
 
 
@@ -197,8 +223,14 @@ def set_job_state_wait_time(target, value, oldvalue, initiator):
 @event.listens_for(JobState.flags, 'set')
 def set_job_state_flags(target, value, oldvalue, initiator):
     target.dirty |= target.D_FLAGS
+    # For new objects oldvalue is not set
+    if isinstance(oldvalue, int):
+        _diff = value ^ int(oldvalue)
+    else:
+        _diff = value
+    target.flags_dirty |= _diff
 
-
+# Listeners to "delete" event for JobState instances. Call the cleanup.
 @event.listens_for(JobState, 'after_delete')
 def delete_job_state(mapper, connection, target):
     StateManager.cleanup(target)
@@ -279,42 +311,46 @@ class Job(Base):
     size = Column(Integer)
     # Data stored in related tables. We use the relationship to make sure
     # related rows will be removed when job is removed
-    #: Job state synchronized with AppGateway
     # Specify explicitly foreign key for JobState. We do not want to use the
     # foreign key constraint so that JobState instances can be inserted into
     # seperate table.
-    #status = relationship("JobState", uselist=False, backref='jobs', cascade="all, delete, delete-orphan",
-    #                      primaryjoin='Job.key==JobState.job_key', foreign_keys='JobState.job_key')
     status_key = Column(Integer, ForeignKey('job_states.key'))
-    status = relationship("JobState", backref=backref('jobs', uselist=False), cascade="all, delete-orphan", single_parent=True)
+    #: Job state synchronized with AppGateway
+    status = relationship("JobState", backref=backref('jobs', uselist=False),
+            cascade="all, delete-orphan", single_parent=True)
     #: Job parameters after validation
-    data = relationship("JobData", uselist=False, backref='jobs', cascade="all, delete-orphan", single_parent=True)
-    #: Stores scheduler related info for jobs that were passed to the scheduler 
-    scheduler = relationship("SchedulerQueue", uselist=False, backref='jobs', cascade="all, delete-orphan", single_parent=True)
+    data = relationship("JobData", uselist=False, backref='jobs',
+            cascade="all, delete-orphan", single_parent=True)
+    #: Stores scheduler related info for jobs that were passed to the scheduler
+    scheduler = relationship("SchedulerQueue", uselist=False, backref='jobs',
+            cascade="all, delete-orphan", single_parent=True)
     #: List of job IDs whose output we would like to consume (job chaining)
-    chain = relationship("JobChain", backref='jobs', cascade="all, delete-orphan", single_parent=True)
+    chain = relationship("JobChain", backref='jobs',
+            cascade="all, delete-orphan", single_parent=True)
 
     def __init__(self, job_id, job_state=None):
         """
         Works with existing job requests that are identified by their unique ID
-        string. Upon initialization loads job parameters from job request JSON
-        file.
+        string.
 
         :param job_id: The unique job ID.
+        :param job_state: Existing JobState instance to associate with the new
+            Job.
         """
         if job_state is None:
             job_state = JobState(job_id)
+        elif not isinstance(job_state, JobState):
+            raise Exception("Unknown JobState type: %s." % type(job_state))
         elif job_state.id != job_id:
             raise Exception("Inconsistent job IDs: %s != %s" % (job_state.id, job_id))
-        if not isinstance(job_state, JobState):
-            raise Exception("Unknown JobState type: %s." % type(job_state))
         self.status = job_state
-        self.size = 0  # Job output size in bytes
-        self.status.exit_code = ExitCodes.Undefined  # Job exit code
+        self.size = 0
+        self.status.exit_code = ExitCodes.Undefined
         self.status.state = 'waiting'
         self.status.submit_time = datetime.utcnow()
 
     def id(self):
+        """ Get the job unique identifier. """
         return self.status.id
 
     def get_size(self):
@@ -448,7 +484,7 @@ class Job(Base):
         except:
             logger.error("@Job - Unable to mark job %s for finalise step." %
                          self.id(), exc_info=True)
-            self.status.state = 'aborted' #TODO sync with appGW??
+            self.status.state = 'aborted'
 
     def exit(self):
         """
@@ -532,15 +568,40 @@ class Job(Base):
         self.data = None
 
     def set_flag(self, flag, remove=False):
-        if flag <=0 or flag > self.FLAG_ALL:
+        """
+        Set a job flag.
+
+        Valid flags are defined in :py:class:`JobState`:
+            FLAG_DELETE, FLAG_STOP, FLAG_WAIT_QUOTA, FLAG_WAIT_INPUT,
+            FLAG_OLD_API, FLAG_ALL
+
+        :param flag: a flag or set of flags to set. e.g.
+            job.set_flag(JobState.FLAG_WAIT_QUOTA | JobState.FLAG_WAIT_INPUT)
+        :param remove: if False the flag bit is set to ON,
+            it is set to OFF otherwise
+        """
+        if flag <=0 or flag > JobState.FLAG_ALL:
             raise exception("unknown job flags %s (%s)." %
                             (flag, self.id()))
         if remove:
-            self.status.flags |= ~flag
+            self.status.flags &= ~flag
         else:
-            self.status.flag |= flag
+            self.status.flags |= flag
 
     def get_flag(self, flag):
+        """
+        Get a value of job flag.
+
+        Valid flags are defined in :py:class:`JobState`:
+            FLAG_DELETE, FLAG_STOP, FLAG_WAIT_QUOTA, FLAG_WAIT_INPUT,
+            FLAG_OLD_API, FLAG_ALL
+
+        :param flag: a flag or set of flags to check. e.g.
+            job.get_flag(JobState.FLAG_WAIT_QUOTA)
+        :return: the value of a flag.  In case of multiple flags like
+            (JobState.FLAG_WAIT_QUOTA | JobState.FLAG_WAIT_INPUT)
+            the return value is 1 when all flags are ON and 0 otherwise.
+        """
         return (self.status.flags & flag) > 0
 
     def __set_state(self, new_state):
@@ -591,77 +652,153 @@ class Job(Base):
 
 class StateManager(object):
     """
-    Interface for persistent storage of job states.
+    Interface for persistent storage of job states and management of the job
+    queue.
 
-    Default implementation uses files on shared file system.
+    Based on SQLite database allows for creation, menagement and querying of
+    jobs.
     """
 
     def __init__(self):
-        #self.engine = create_engine('sqlite:///:memory:', echo=True)
-        #engine = create_engine('sqlite:///:memory:')
-        #self.engine = create_engine('sqlite:///jobs.db', echo=True)
+        _DB = 'sqlite:///jobs.db'
+        #: Turn on DB logging for verbose mode
         _verbose = False
-        if(conf.log_level == 'VERBOSE'):
-            _verbose = True
-        self.engine = create_engine('sqlite:///jobs.db', echo=_verbose)
+        #_verbose = True
+        #: DB engine
+        self.engine = create_engine(_DB, echo=_verbose)
+        # Enforce foreign keys in SQLite
         self.engine.execute('pragma foreign_keys=on')
+        #: Session factory
         self.session_factory = sessionmaker()
         self.session_factory.configure(bind=self.engine)
         #: DB session handle
         self.session = self.session_factory()
+        # Create the tables in the DB
         #TODO what if the DB exists?
         Base.metadata.create_all(self.engine)
 
     def new_session(self):
+        """
+        Create new DB session.
+
+        :return: session instance.
+        """
         return self.session_factory()
 
     def expire_session(self, session=None):
+        """
+        Expire session cache. Will reload all objects from the DB on next
+        access.
+
+        :param session: if specified use this session instance instead of the
+            default.
+        """
         if session is None:
             session = self.session
         session.expire_all()
 
     def commit(self, session=None):
+        """
+        Commit changes to the DB.
+
+        :param session: if specified use this session instance instead of the
+            default.
+        """
         verbose("@StateManager: Commit session to DB")
         if session is None:
             session = self.session
 
+        # Issue rollback in case of problems.
+        # Otherwise SQLAlchemy is in inconsistent state and raises exceptions.
         try:
             session.commit()
         except:
+            logger.error("@StateManager - Commit failed.", exc_info=True)
             session.rollback()
 
+    def poll_gw(self, session=None):
+        """
+        Check for changes in job states issued by the AppGW.
+
+        If found merge them into the DB.
+
+        :param session: if specified use this session instance instead of the
+            default.
+        """
+        raise NotImplementedError
+
     def cleanup(self, status):
+        """
+        Cleanup AppGW state after Job removal.
+
+        :param status: JobState instance.
+        """
         raise NotImplementedError
 
     def new_job(self, job_id):
+        """
+        Create new Job instance with job_id identifier and attach it to DB
+        session.
+
+        Depending on the implementation can query the AppGW and set the proper
+        job state.
+
+        :param job_id: the unique job identifier.
+        :return: the new Job instance.
+        """
         raise NotImplementedError
 
     def attach_job(self, job, session=None):
+        """
+        Attach a Job instance to the DB session.
+
+        :param job: the Job instance.
+        :param session: if specified use this session instance instead of the
+            default.
+        """
         if session is None:
             session = self.session
+        verbose("@StateManager: Will attach job %s to the session." % job.id())
         session.add(job)
 
     def detach_job(self, job, session=None):
+        """
+        Attach a Job instance to the DB session.
+
+        :param job: the Job instance.
+        :param session: if specified use this session instance instead of the
+            default.
+        """
         if session is None:
             session = self.session
         verbose("@StateManager: Will detach job %s from session." % job.id())
-        verbose("@StateManager: Dirty - %s." % session.dirty)
+        # Make sure no changes are pending
         self.commit(session)
         session.expunge(job)
 
     def merge_job(self, job, session=None):
+        """
+        Merge state of a Job instance into the DB session.
+
+        :param job: the Job instance.
+        :param session: if specified use this session instance instead of the
+            default.
+        """
         if session is None:
             session = self.session
+        # Make sure no changes are pending
         self.commit(session)
         session.merge(job)
 
     def get_job(self, job_id, session=None):
         """
-        Get Job object from JobStore.
+        Get Job object from the job queue.
 
         :param job_id: Job unique ID,
-        :return: Job object for *job_id*.
-        :throws: NoResultFound exception if job_id is not recognized. 
+        :param session: if specified use this session instance instead of the
+            default.
+        :return: Job object for *job_id*, None if job_id was not found in the
+            queue.
         """
         if session is None:
             session = self.session
@@ -669,22 +806,38 @@ class StateManager(object):
         return session.query(Job).join(JobState).filter(JobState.id == job_id).one()
 
     def get_new_job_list(self):
+        """
+        Query AppGW for a list of jobs that are in a *new* state.
+
+        For each job in *new* state a Job instance will be created and attached
+        to the default DB session. The jobs are set into waiting state.
+
+        :return: a list of Job instances that were in the *new* state.
+        """
         raise NotImplementedError
 
     def get_job_list(self, state="all", service=None, flag=None, session=None):
         """
         Get a list of jobs that are in a selected state.
 
-	:param state: Specifies state for which Jobs will be selected. To
-	    select all jobs specify 'all' as the state. Valid states consist of
-	    job states and flags: waiting, queued, running, closing, cleanup,
+        :param state: Specifies state for which Jobs will be selected. To
+            select all jobs specify 'all' as the state. Valid states consist of
+            job states and flags: waiting, queued, running, closing, cleanup,
             done, failed, aborted, killed
+        :param service: if specified select only jobs that belong to selected
+            service.
+        :param flag: if specified select only jobs with the flag (or set of
+            flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
+        :param session: if specified use this session instance instead of the
+            default.
 
         :return: List of Job instances sorted by submit time.
+        :raises:
         """
         if session is None:
             session = self.session
 
+        # Validate input
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s" % state)
             return
@@ -694,7 +847,8 @@ class StateManager(object):
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return
-       
+
+        # Build query
         _q = session.query(Job).join(JobState) 
         if state != 'all':
             _q = _q.filter(JobState.state == state)
@@ -702,17 +856,26 @@ class StateManager(object):
             _q = _q.filter(JobState.service == service)
         if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
+        # Order results by submit time
         _q = _q.order_by(JobState.submit_time)
+        # Execute query
         return _q.all()
 
-    def get_job_count(self, state="all", service=None, flag=None, session=None):
+    def get_job_count(self, state="all", service=None, flag=None,
+                      session=None):
         """
         Get a count of jobs that are in a selected state.
 
-	:param state: Specifies state for which Jobs will be selected. To
-	    select all jobs specify 'all' as the state. Valid states consist of
-	    job states and flags: waiting, queued, running, closing, cleanup,
+        :param str state: Specifies state for which Jobs will be selected. To
+            select all jobs specify 'all' as the state. Valid states consist of
+            job states and flags: waiting, queued, running, closing, cleanup,
             done, failed, aborted, killed
+        :param str service: if specified select only jobs that belong to
+            selected service.
+        :param int flag: if specified select only jobs with the flag (or set of
+            flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
+        :param Session session: if specified use this session instance instead
+            of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
         """
@@ -721,6 +884,7 @@ class StateManager(object):
 
         _job_count = -1
 
+        # Validate input
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s" % state)
             return _job_count
@@ -730,7 +894,8 @@ class StateManager(object):
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return _job_count
-       
+
+        # Build query
         _q = session.query(Job).join(JobState) 
         if state != 'all':
             _q = _q.filter(JobState.state == state)
@@ -738,26 +903,39 @@ class StateManager(object):
             _q = _q.filter(JobState.service == service)
         if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
+        # Execute query
         try:
-	    return _q.count()
+            return _q.count()
         except:
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
 
-    def get_scheduler_list(self, scheduler, state="all", service=None, flag=None, session=None):
+    def get_scheduler_list(self, scheduler, state="all", service=None,
+                           flag=None, session=None):
         """
         Get a list of jobs that are in a scheduler queue.
 
-        :param scheduler: Specifies scheduler name for which Jobs will be
+        :param str scheduler: Specifies scheduler name for which Jobs will be
             selected.
+        :param str state: Specifies state for which Jobs will be selected. To
+            select all jobs specify 'all' as the state. Valid states consist of
+            job states and flags: waiting, queued, running, closing, cleanup,
+            done, failed, aborted, killed
+        :param str service: if specified select only jobs that belong to
+            selected service.
+        :param int flag: if specified select only jobs with the flag (or set of
+            flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
+        :param Session session: if specified use this session instance instead
+            of the default.
 
         :return: List of Job instances sorted by submit time.
+        :raises:
         """
         if session is None:
             session = self.session
 
-
-	if scheduler not in SchedulerStore.keys():
+        # Validate input
+        if scheduler not in SchedulerStore.keys():
             logger.error(
                 "@StateManager - unknown scheduler %s." % scheduler
             )
@@ -771,7 +949,8 @@ class StateManager(object):
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return
-       
+
+        # Build query - select only jobs that belong to specified scheduler
         _q = session.query(Job).join(JobState).join(SchedulerQueue).\
                  filter(SchedulerQueue.scheduler == scheduler)
         if state != 'all':
@@ -780,15 +959,28 @@ class StateManager(object):
             _q = _q.filter(JobState.service == service)
         if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
+        # Order results by submit time
         _q = _q.order_by(JobState.submit_time)
-	return _q.all()
+        # Execute query
+        return _q.all()
 
-    def get_scheduler_count(self, scheduler, state="all", service=None, flag=None, session=None):
+    def get_scheduler_count(self, scheduler, state="all", service=None,
+                            flag=None, session=None):
         """
         Get a count jobs that are in a scheduler queue.
 
         :param scheduler: Specifies scheduler name for which Jobs will be
             selected.
+        :param state: Specifies state for which Jobs will be selected. To
+            select all jobs specify 'all' as the state. Valid states consist of
+            job states and flags: waiting, queued, running, closing, cleanup,
+            done, failed, aborted, killed
+        :param service: if specified select only jobs that belong to selected
+            service.
+        :param flag: if specified select only jobs with the flag (or set of
+            flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
+        :param session: if specified use this session instance instead of the
+            default.
 
         :return: Number of jobs in the scheduler queue, or -1 in case of error.
         """
@@ -797,7 +989,8 @@ class StateManager(object):
 
         _job_count = -1
 
-	if scheduler not in SchedulerStore.keys():
+        # Validate input
+        if scheduler not in SchedulerStore.keys():
             logger.error(
                 "@StateManager - unknown scheduler %s." % scheduler
             )
@@ -811,7 +1004,8 @@ class StateManager(object):
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
             logger.error("@StateManager - Unknown flag: %s" % flag)
             return _job_count
-       
+
+        # Build query - select only jobs that belong to specified scheduler
         _q = session.query(Job).join(JobState).join(SchedulerQueue).\
                  filter(SchedulerQueue.scheduler == scheduler)
         if state != 'all':
@@ -820,8 +1014,9 @@ class StateManager(object):
             _q = _q.filter(JobState.service == service)
         if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
+        # Execute query
         try:
-	    return _q.count()
+            return _q.count()
         except:
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
@@ -895,11 +1090,13 @@ class FileStateManager(StateManager):
         return _jobs
 
     def commit(self, session=None):
-        verbose("@FileStateManager: Sync DB with AppGW.")
+        verbose("@FileStateManager: Push status changes to AppGW.")
         if session is None:
             session = self.session
 
         for _entry in session.query(JobState).filter(JobState.dirty > 0):
+            verbose("@FileStateManager: Found dirty (%s) JobState (%s)." %
+                    (_entry.dirty, _entry.id))
             if _entry.dirty & JobState.D_SERVICE:
                 self.__service_change(_entry)
             if _entry.dirty & JobState.D_STATE:
@@ -924,10 +1121,56 @@ class FileStateManager(StateManager):
 
         super(FileStateManager, self).commit(session)
 
+    def poll_gw(self, session=None):
+        verbose(u"@FileStateManager: Poll AppGW for status changes.")
+        if session is None:
+            session = self.session
+
+        # Kill flags
+        _path = conf.gate_path_flag_stop
+        try:
+            _list = os.listdir(_path)
+        except:
+            logger.error(u"@FileStateManager - Unable to read directory: %s." %
+                         _path, exc_info=True)
+            return
+
+        for _job in self.get_job_list(flag=JobState.FLAG_STOP):
+            if _job.id() in _list:
+                _list.remove(_job.id())
+
+        for _id in _list:
+            _job = self.get_job(_id)
+            _job.set_flag(JobState.FLAG_STOP)
+
+        # Delete flags
+        _path = conf.gate_path_flag_delete
+        try:
+            _list = os.listdir(_path)
+        except:
+            logger.error(u"@FileStateManager - Unable to read directory: %s." %
+                         _path, exc_info=True)
+            return
+
+        for _job in self.get_job_list(flag=JobState.FLAG_DELETE):
+            if _job.id() in _list:
+                _list.remove(_job.id())
+
+        for _id in _list:
+            _job = self.get_job(_id)
+            _job.set_flag(JobState.FLAG_DELETE)
+
     def cleanup(self, status):
+        """
+        Cleanup after job removal.
+
+        Removes the flags and other files representing job state.
+
+        :param status: JobState instance
+        """
         _jib = status.id
 
-        verbose("@FileStateManager: Job cleanup (%s)" % _jid)
+        verbose(u"@FileStateManager: Job cleanup (%s)" % _jid)
         # Remove job symlinks
         for _state, _path in conf.gate_path.items():
             _name = os.path.join(_path, _jid)
@@ -953,6 +1196,11 @@ class FileStateManager(StateManager):
         pass
 
     def __state_change(self, status):
+        """
+        Propagate the job state to the GW.
+
+        :param ststus: JobState instace
+        """
         _jid = status.id
         _new_state = status.state
 
@@ -971,120 +1219,185 @@ class FileStateManager(StateManager):
                     os.unlink(_name)
 
     def __exit_message_change(self, status):
+        """
+        Propagate the exit message to the GW.
+
+        :param ststus: JobState instace
+        """
         _jid = status.id
 
         verbose("@FileStateManager: Store exit msg: %s (%s)" % (status.exit_message, _jid))
-        # Store the auxiliary info into an .opt file
+        # The auxiliary info is stored in the opts directory as files with
+        # names concatanated from data type name and job ID.
         _opt = os.path.join(conf.gate_path_opts, 'message_' + _jid)
         with open(_opt, 'w') as _f:
             _f.write(status.exit_message)
 
     def __exit_state_change(self, status):
+        """
+        Propagate the exit state to the GW.
+
+        :param ststus: JobState instace
+        """
         _jid = status.id
 
         verbose("@FileStateManager: Store exit state: %s (%s)" % (status.exit_state, _jid))
-        # Store the auxiliary info into an .opt file
+        # The auxiliary info is stored in the opts directory as files with
+        # names concatanated from data type name and job ID.
         _opt = os.path.join(conf.gate_path_opts, 'state_' + _jid)
         with open(_opt, 'w') as _f:
             _f.write(status.exit_state)
 
     def __exit_code_change(self, status):
+        """
+        Propagate the exit code to the GW.
+
+        :param ststus: JobState instace
+        """
         _jid = status.id
 
         verbose("@FileStateManager: Store exit code: %s (%s)" % (status.exit_code, _jid))
-        # Store the auxiliary info into an .opt file
+        # The auxiliary info is stored in the opts directory as files with
+        # names concatanated from data type name and job ID.
         _opt = os.path.join(conf.gate_path_opts, 'code_' + _jid)
         with open(_opt, 'w') as _f:
             _f.write("%s" % status.exit_code)
 
     def __submit_time_change(self, status):
+        """
+        Propagate the submit timestamp to the GW.
+
+        :param ststus: JobState instace
+        """
         _jid = status.id
 
         verbose("@FileStateManager: Submit time change: %s (%s)" % (status.submit_time, _jid))
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "submit_" + _jid)
+        # Calculate UNIX time stamp as number of seconds since epoch
         _tstamp = (status.submit_time - datetime(1970,1,1)).total_seconds()
         with file(_fname, 'a'):
             os.utime(_fname, (_tstamp, _tstamp))
 
     def __start_time_change(self, status):
+        """
+        Propagate the start timestamp to the GW.
+
+        :param ststus: JobState instace
+        """
         _jid = status.id
 
         verbose("@FileStateManager: Start time change: %s (%s)" % (status.start_time, _jid))
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "start_" + _jid)
+        # Calculate UNIX time stamp as number of seconds since epoch
         _tstamp = (status.start_time - datetime(1970,1,1)).total_seconds()
         with file(_fname, 'a'):
             os.utime(_fname, (_tstamp, _tstamp))
 
     def __stop_time_change(self, status):
+        """
+        Propagate the stop timestamp to the GW.
+
+        :param ststus: JobState instace
+        """
         _jid = status.id
 
         verbose("@FileStateManager: Stop time change: %s (%s)" % (status.stop_time, _jid))
-        _tstamp = (status.stop_time - datetime(1970,1,1)).total_seconds()
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "stop_" + _jid)
+        # Calculate UNIX time stamp as number of seconds since epoch
+        _tstamp = (status.stop_time - datetime(1970,1,1)).total_seconds()
         with file(_fname, 'a'):
             os.utime(_fname, (_tstamp, _tstamp))
 
     def __wait_time_change(self, status):
+        """
+        Propagate the wait timestamp to the GW.
+
+        :param ststus: JobState instace
+        """
         _jid = status.id
 
         verbose("@FileStateManager: Wait time change: %s (%s)" % (status.wait_time, _jid))
-        _tstamp = (status.wait_time - datetime(1970,1,1)).total_seconds()
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "wait_" + _jid)
+        # Calculate UNIX time stamp as number of seconds since epoch
+        _tstamp = (status.wait_time - datetime(1970,1,1)).total_seconds()
         with file(_fname, 'a'):
             os.utime(_fname, (_tstamp, _tstamp))
 
     def __flags_change(self, status):
+        """
+        Propagate the changes in flags to the GW.
+
+        In case a flag was modified by both AppServer and the GW the value set
+        by Server is used.
+
+        :param status: - JobState instance
+        """
         _jid = status.id
-        _flags_add = []
-        _flags_remove = []
+        _flags_add = []    # Flags to set
+        _flags_remove = [] # Flags to remove
 
-        verbose("@FileStateManager: Flags change: %s (%s)" % (status.flags, _jid))
-        _flag = 'flag_delete'
-        if status.flags & JobState.FLAG_DELETE:
-            _flags_add.append(_flag)
-        else:
-            _flags_remove.append(_flag)
-        _flag = 'flag_stop'
-        if status.flags & JobState.FLAG_STOP:
-            _flags_add.append(_flag)
-        else:
-            _flags_remove.append(_flag)
-        _flag = 'flag_wait_quota'
-        if status.flags & JobState.FLAG_WAIT_QUOTA:
-            _flags_add.append(_flag)
-        else:
-            _flags_remove.append(_flag)
-        _flag = 'flag_wait_input'
-        if status.flags & JobState.FLAG_WAIT_INPUT:
-            _flags_add.append(_flag)
-        else:
-            _flags_remove.append(_flag)
-        _flag = 'flag_old_api'
-        if status.flags & JobState.FLAG_OLD_API:
-            _flags_add.append(_flag)
-        else:
-            _flags_remove.append(_flag)
+        verbose("@FileStateManager: Flags change: %s (%s)" %
+                (status.flags, _jid))
+        # Consider only flags that were modified - have flags_dirty flag set
+        # Flags that are currently set are added to _flags_add
+        # Flags that are not set are added to _flags_remove
+        if status.flags_dirty & JobState.FLAG_DELETE:
+            _flag = 'flag_delete'
+            if status.flags & JobState.FLAG_DELETE:
+                _flags_add.append(_flag)
+            else:
+                _flags_remove.append(_flag)
+        if status.flags_dirty & JobState.FLAG_STOP:
+            _flag = 'flag_stop'
+            if status.flags & JobState.FLAG_STOP:
+                _flags_add.append(_flag)
+            else:
+                _flags_remove.append(_flag)
+        if status.flags_dirty & JobState.FLAG_WAIT_QUOTA:
+            _flag = 'flag_wait_quota'
+            if status.flags & JobState.FLAG_WAIT_QUOTA:
+                _flags_add.append(_flag)
+            else:
+                _flags_remove.append(_flag)
+        if status.flags_dirty & JobState.FLAG_WAIT_INPUT:
+            _flag = 'flag_wait_input'
+            if status.flags & JobState.FLAG_WAIT_INPUT:
+                _flags_add.append(_flag)
+            else:
+                _flags_remove.append(_flag)
+        if status.flags_dirty & JobState.FLAG_OLD_API:
+            _flag = 'flag_old_api'
+            if status.flags & JobState.FLAG_OLD_API:
+                _flags_add.append(_flag)
+            else:
+                _flags_remove.append(_flag)
 
+        # Set new flags
         for _flag in _flags_add:
-	    _path = os.path.join(conf.gate_path[_flag], jid)
+            _path = os.path.join(conf.gate_path[_flag], _jid)
             # Mark new state in the shared file system
             if not os.path.exists(_path):
                 os.symlink(
-                    os.path.join(conf.gate_path_jobs, jid),
+                    os.path.join(conf.gate_path_jobs, _jid),
                     _path
                 )
 
+        # Remove old flags
         for _flag in _flags_remove:
-	    _path = os.path.join(conf.gate_path[_flag], jid)
+            _path = os.path.join(conf.gate_path[_flag], _jid)
             if os.path.exists(_path):
                 os.unlink(_path)
 
+        # Remove the dirty flag
+        status.flags_dirty = 0
+
+# Singleton object
 StateManager = FileStateManager()
