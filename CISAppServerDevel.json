@@ -4,7 +4,7 @@
     // ***************
     //
     // Sleep interval in seconds between job status queries (dafault: 3)
-    "config_sleep_time" : 7,
+    "config_sleep_time" : 3,
     //
     // Every n-th status query dump the progress logs (default: 2)
     //"config_progress_step" : 2,
@@ -33,12 +33,14 @@
     //
     // Logging level: VERBOSE, DEBUG, INFO, WARNING, ERROR (default: INFO)
     //"log_level" : "INFO",
+    //"log_level" : "DEBUG",
+    //"log_level" : "VERBOSE",
     //
     // Log output file name (default: /tmp/CISAppServer.log)
     "log_output" : "/var/log/app-server/app-server-devel.log",
     //
     // Send notifications about ERRORS using email
-    "log_email" : "konrad.klimaszewski@gazeta.pl",
+    "log_email" : "konrad.klimaszewski@cis.gov.pl",
     //
     // ************
     // PBS settings
@@ -53,7 +55,7 @@
     "pbs_path_work" : "/mnt/home/apprunner/Scratch/AppServerDevel",
     //
     // Name of default PBS queue (default: short)
-    "pbs_default_queue" : "test_slc6",
+    "pbs_default_queue" : "q12h",
     //
     // Maximum number of concurent PBS jobs (default: 100)
     //"pbs_max_jobs" : 100,

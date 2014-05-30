@@ -8,8 +8,8 @@
         },
         "CIS_QUEUE" : {
             "type" : "string",
-            "default" : "test_slc6",
-            "values" : ["short", "long", "test_slc6"]
+            "default" : "q12h",
+            "values" : ["q12h", "q3d"]
         },
         "CIS_SSH_HOST" : {
             "type" : "string",
