@@ -8,6 +8,7 @@
     //
     // Every n-th status query dump the progress logs (default: 2)
     //"config_progress_step" : 2,
+    "config_schedulers" : ["pbs"],
     //
     // ***************
     // Daemon settings
@@ -37,7 +38,7 @@
     "log_output" : "/var/log/app-server/app-server.log",
     //
     // Send notifications about ERRORS using email
-    "log_email" : "konrad.klimaszewski@gazeta.pl"
+    "log_email" : "konrad.klimaszewski@cis.gov.pl",
     //
     // ************
     // PBS settings
@@ -52,7 +53,7 @@
     "pbs_path_work" : "/mnt/home/apprunner/AppServer",
     //
     // Name of default PBS queue (default: short)
-    //"pbs_default_queue" : "short",
+    "pbs_default_queue" : "q12h",
     //
     // Maximum number of concurent PBS jobs (default: 100)
     //"pbs_max_jobs" : 100,
