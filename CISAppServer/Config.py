@@ -131,7 +131,7 @@ class Config(dict):
         self.pbs_path_queue = 'PBS/Queue'
         #: Path where PBS backeng will create job working directories
         self.pbs_path_work = 'PBS/Scratch'
-        self.pbs_default_queue = 'short'  #: Name of default PBS queue
+        self.pbs_default_queue = 'a12h'  #: Name of default PBS queue
         self.pbs_max_jobs = 100  #: Maximum number of concurent PBS jobs
         #: Path where SSH backend will store job IDs
         self.ssh_path_queue = 'SSH/Queue'
@@ -157,7 +157,7 @@ class Config(dict):
         self.service_allowed_sections = ('service', 'api', 'input', 'chain')
         #: Reserved key names for job parameters
         self.service_reserved_keys = (
-            'CIS_SCHEDULER', 'CIS_QUEUE', 'CIS_SSH_HOST'
+            'CIS_SCHEDULER', 'CIS_QUEUE'
         )
         #: Default user name for job execution
         self.service_username = 'apprunner'
@@ -180,6 +180,8 @@ class Config(dict):
         #: Default expected output size of a job in MB. It is used to estimate
         #: space requirements for jobs that are to be scheduled.
         self.service_job_size = 50
+        #: Default scheduler
+        self.service_scheduler = 'pbs'
         #: Path to the shared storage used as communication medium with
         #: AppGateway
         self.gate_path_shared = 'Shared'
@@ -268,8 +270,10 @@ class Config(dict):
             self.log_config['handlers']['file']['filename'] = \
                 self.log_output
         if not self.log_email:
-            del self.log_config['handlers']['mail']
-            self.log_config['root']['handlers'].remove('mail')
+            if 'mail' in self.log_config['handlers'].keys():
+                del self.log_config['handlers']['mail']
+            if 'mail' in self.log_config['root']['handlers']:
+                self.log_config['root']['handlers'].remove('mail')
         else:
             self.log_config['handlers']['mail']['toaddrs'] = self.log_email
 

@@ -1,5 +1,8 @@
 {
-    "config" : {},
+    "config" : {
+        "scheduler" : "pbs",
+        "queue" : "i12h"
+    },
     "variables" : {
         // Sleep interval
         "SLEEP" : {
