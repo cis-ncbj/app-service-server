@@ -425,6 +425,7 @@ class JobManager(object):
 
         verbose('@JManager - Check for finished cleanup threads.')
 
+        #@TODO should we call commit?
         # Remove finished threads
         for _thread in self.__thread_list:
             if not _thread.is_alive():
@@ -473,7 +474,7 @@ class JobManager(object):
             try:
                 # We consider only jobs that could have produced output
                 if _state in ['done', 'failed', 'killed', 'aborted']:
-                    _time = _jid.status.stop_time
+                    _time = _job.status.stop_time
                 else:
                     continue
 
@@ -568,6 +569,7 @@ class JobManager(object):
         self.check_cleanup()
         time.sleep(conf.config_shutdown_time)
 
+        #@TODO should we call commit?
         for _thread in self.__thread_list:
             # @TODO Kill the thread
             _thread.join()

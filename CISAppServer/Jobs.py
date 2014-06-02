@@ -132,13 +132,13 @@ class JobState(Base):
         D_ALL = \
         (1<<x for x in range(0,13))
     D_ALL -= 1
-    dirty = Column(Integer)
+    attr_dirty = Column(Integer)
 
     def __init__(self, id, service=None, scheduler=None, state=None, exit_message=None,
                  exit_state=None, exit_code=None, submit_time=None, start_time=None,
                  stop_time=None, wait_time=None, flags=0):
         #: Dirty flags
-        self.dirty = 0
+        self.attr_dirty = 0
         self.flags_dirty = 0
         self.id = id
         self.service = service
@@ -153,76 +153,70 @@ class JobState(Base):
         self.wait_time = wait_time
         self.flags = flags
         # Reset dirty flags
-        self.dirty = 0
-        self.flags_dirty = 0
-
-    # Initialize on load from DB
-    @orm.reconstructor
-    def init_on_load(self):
-        self.dirty = 0
+        self.attr_dirty = 0
         self.flags_dirty = 0
 
 # Listeners to "set" events for JobState attributes. They set dirty flags that
 # are used to sync the changes with AppGw.
 @event.listens_for(JobState.id, 'set')
 def set_job_state_id(target, value, oldvalue, initiator):
-    target.dirty |= target.D_ID
+    target.attr_dirty |= target.D_ID
 
 
 @event.listens_for(JobState.service, 'set')
 def set_job_state_service(target, value, oldvalue, initiator):
-    target.dirty |= target.D_SERVICE
+    target.attr_dirty |= target.D_SERVICE
 
 
 @event.listens_for(JobState.scheduler, 'set')
 def set_job_state_scheduler(target, value, oldvalue, initiator):
-    target.dirty |= target.D_SCHEDULER
+    target.attr_dirty |= target.D_SCHEDULER
 
 
 @event.listens_for(JobState.state, 'set')
 def set_job_state_state(target, value, oldvalue, initiator):
     verbose("@JobState - Dirty: state changed (%s => %s)" % (oldvalue, value))
-    target.dirty |= target.D_STATE
+    target.attr_dirty |= target.D_STATE
 
 
 @event.listens_for(JobState.exit_message, 'set')
 def set_job_state_exit_message(target, value, oldvalue, initiator):
-    target.dirty |= target.D_EXIT_MESSAGE
+    target.attr_dirty |= target.D_EXIT_MESSAGE
 
 
 @event.listens_for(JobState.exit_state, 'set')
 def set_job_state_exit_state(target, value, oldvalue, initiator):
-    target.dirty |= target.D_EXIT_STATE
+    target.attr_dirty |= target.D_EXIT_STATE
 
 
 @event.listens_for(JobState.exit_code, 'set')
 def set_job_state_exit_code(target, value, oldvalue, initiator):
-    target.dirty |= target.D_EXIT_CODE
+    target.attr_dirty |= target.D_EXIT_CODE
 
 
 @event.listens_for(JobState.submit_time, 'set')
 def set_job_state_submit_time(target, value, oldvalue, initiator):
-    target.dirty |= target.D_SUBMIT_TIME
+    target.attr_dirty |= target.D_SUBMIT_TIME
 
 
 @event.listens_for(JobState.start_time, 'set')
 def set_job_state_start_time(target, value, oldvalue, initiator):
-    target.dirty |= target.D_START_TIME
+    target.attr_dirty |= target.D_START_TIME
 
 
 @event.listens_for(JobState.stop_time, 'set')
 def set_job_state_stop_time(target, value, oldvalue, initiator):
-    target.dirty |= target.D_STOP_TIME
+    target.attr_dirty |= target.D_STOP_TIME
 
 
 @event.listens_for(JobState.wait_time, 'set')
 def set_job_state_wait_time(target, value, oldvalue, initiator):
-    target.dirty |= target.D_WAIT_TIME
+    target.attr_dirty |= target.D_WAIT_TIME
 
 
 @event.listens_for(JobState.flags, 'set')
 def set_job_state_flags(target, value, oldvalue, initiator):
-    target.dirty |= target.D_FLAGS
+    target.attr_dirty |= target.D_FLAGS
     # For new objects oldvalue is not set
     if isinstance(oldvalue, int):
         _diff = value ^ int(oldvalue)
@@ -428,7 +422,7 @@ class Job(Base):
 
     def delete(self):
         """ Mark job for removal. """
-        self.set_flag(self, self.FLAG_DELETE)
+        self.set_flag(JobState.FLAG_DELETE)
 
     def mark(self, message, exit_code=ExitCodes.UserKill):
         """
@@ -499,7 +493,6 @@ class Job(Base):
                      self.id())
             return
 
-        #TODO write exit message in set_exit_message
         # Generate the output status file
         try:
             self.__set_state(self.status.exit_state)
@@ -581,7 +574,7 @@ class Job(Base):
             it is set to OFF otherwise
         """
         if flag <=0 or flag > JobState.FLAG_ALL:
-            raise exception("unknown job flags %s (%s)." %
+            raise Exception("Unknown job flags %s (%s)." %
                             (flag, self.id()))
         if remove:
             self.status.flags &= ~flag
@@ -1043,10 +1036,19 @@ class StateManager(object):
         if service != 'all':
             _q = _q.filter(JobState.service == service)
         _list = _q.all()
-        # TODO run update instead of select? What about triggers?
 
         for _job in _list:
             _job.set_flag(flag, remove=True)
+
+        # @TODO Test the update code instead of select+modify approach.
+        #       Requires session.commit to be in consisten state?? synchronize_session takes care of this??
+        #_q = session.query(JobState)
+        #if service != 'all':
+        #    _q = _q.filter(JobState.service == service)
+        #_q.update(values={
+        #    JobState.flags: JobState.flags &= ~flag,
+        #    JobState.flags_dirty: JobState.flags_dirty &= ~flag
+        #    }, sychronize_session='fetch')
 
     def delete_job(self, job, session=None):
         '''
@@ -1075,7 +1077,6 @@ class FileStateManager(StateManager):
                          _path, exc_info=True)
             return
 
-        # TODO make sure that session commit will remove the new state. Currently new jobs are considered clean ...
         for _jid in _list:
             # Create new Job instance. It will be created in 'waiting' state
             _job = self.new_job(_jid)
@@ -1094,30 +1095,30 @@ class FileStateManager(StateManager):
         if session is None:
             session = self.session
 
-        for _entry in session.query(JobState).filter(JobState.dirty > 0):
+        for _entry in session.query(JobState).filter(JobState.attr_dirty > 0):
             verbose("@FileStateManager: Found dirty (%s) JobState (%s)." %
-                    (_entry.dirty, _entry.id))
-            if _entry.dirty & JobState.D_SERVICE:
+                    (_entry.attr_dirty, _entry.id))
+            if _entry.attr_dirty & JobState.D_SERVICE:
                 self.__service_change(_entry)
-            if _entry.dirty & JobState.D_STATE:
+            if _entry.attr_dirty & JobState.D_STATE:
                 self.__state_change(_entry)
-            if _entry.dirty & JobState.D_EXIT_MESSAGE:
+            if _entry.attr_dirty & JobState.D_EXIT_MESSAGE:
                 self.__exit_message_change(_entry)
-            if _entry.dirty & JobState.D_EXIT_STATE:
+            if _entry.attr_dirty & JobState.D_EXIT_STATE:
                 self.__exit_state_change(_entry)
-            if _entry.dirty & JobState.D_EXIT_CODE:
+            if _entry.attr_dirty & JobState.D_EXIT_CODE:
                 self.__exit_code_change(_entry)
-            if _entry.dirty & JobState.D_SUBMIT_TIME:
+            if _entry.attr_dirty & JobState.D_SUBMIT_TIME:
                 self.__submit_time_change(_entry)
-            if _entry.dirty & JobState.D_START_TIME:
+            if _entry.attr_dirty & JobState.D_START_TIME:
                 self.__start_time_change(_entry)
-            if _entry.dirty & JobState.D_STOP_TIME:
+            if _entry.attr_dirty & JobState.D_STOP_TIME:
                 self.__stop_time_change(_entry)
-            if _entry.dirty & JobState.D_WAIT_TIME:
+            if _entry.attr_dirty & JobState.D_WAIT_TIME:
                 self.__wait_time_change(_entry)
-            if _entry.dirty & JobState.D_FLAGS:
+            if _entry.attr_dirty & JobState.D_FLAGS:
                 self.__flags_change(_entry)
-            _entry.dirty = 0
+            _entry.attr_dirty = 0
 
         super(FileStateManager, self).commit(session)
 
@@ -1135,6 +1136,7 @@ class FileStateManager(StateManager):
                          _path, exc_info=True)
             return
 
+        #@TODO should we use session??
         for _job in self.get_job_list(flag=JobState.FLAG_STOP):
             if _job.id() in _list:
                 _list.remove(_job.id())
@@ -1168,7 +1170,7 @@ class FileStateManager(StateManager):
 
         :param status: JobState instance
         """
-        _jib = status.id
+        _jid = status.id
 
         verbose(u"@FileStateManager: Job cleanup (%s)" % _jid)
         # Remove job symlinks

@@ -87,7 +87,7 @@ class Validator(object):
         _services = os.listdir(_path)
         _plugins = []
         for _service in _services:
-            #TODO validate options structure
+            # @TODO validate options structure
             _file_name = os.path.join(_path, _service)
             # Allow for subdirectories
             if not os.path.isfile(_file_name):
@@ -1131,7 +1131,6 @@ class PbsScheduler(Scheduler):
         """
         _pbs_id = ''
 
-        # @TODO move to state manager
         # Get Job PBS ID
         try:
             _pbs_id = str(job.scheduler.id)
@@ -1142,6 +1141,7 @@ class PbsScheduler(Scheduler):
         # Run qdel
         try:
             logger.debug("@PBS - Killing job")
+            # @TODO Seperate users for each sevice
             # Run qdel with proper user permissions
             # _user = self.jm.services[job.service].config['username']
             # _comm = "/usr/bin/qdel %s" % _pbs_id
