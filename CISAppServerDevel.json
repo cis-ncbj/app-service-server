@@ -54,8 +54,8 @@
     // relative to Daemon working directory (default: PBS/Scratch)
     "pbs_path_work" : "/mnt/home/apprunner/Scratch/AppServerDevel",
     //
-    // Name of default PBS queue (default: short)
-    "pbs_default_queue" : "q12h",
+    // Name of default PBS queue (default: a12h)
+    "pbs_default_queue" : "a12h",
     //
     // Maximum number of concurent PBS jobs (default: 100)
     //"pbs_max_jobs" : 100,
