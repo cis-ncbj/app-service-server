@@ -8,7 +8,7 @@
         "CIS_QUEUE" : {
             "type" : "string",
             "values" : ["", "a12h", "a3d", "i12h", "a12h", "localhost"]
-        },
+        }
     },
     "sets" : {}
 }
