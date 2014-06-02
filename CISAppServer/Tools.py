@@ -83,7 +83,9 @@ class Service(dict):
             'max_jobs': conf.service_max_jobs,
             'quota': conf.service_quota,
             'job_size': conf.service_job_size,
-            'username': conf.service_username
+            'username': conf.service_username,
+            'scheduler': conf.service_scheduler,
+            'queue': ""
         }
         # Load settings from config file
         self.config.update(data['config'])
@@ -281,12 +283,12 @@ class Validator(object):
 
         # Load defaults
         _variables = {
-            _k: _v['default'] for _k, _v in
-            _service.variables.items()
+                "CIS_SCHEDULER" : _service.config['scheduler'],
+                "CIS_QUEUE" : _service.config['queue'],
         }
         _variables.update({
             _k: _v['default'] for _k, _v in
-            self.services['default'].variables.items()
+            _service.variables.items()
         })
 
         # Load sets
@@ -1245,8 +1247,8 @@ class SshScheduler(Scheduler):
 
         # Select execution host
         _queue = self.default_queue
-        if job.valid_data['CIS_SSH_HOST'] != "":
-            _queue = job.valid_data['CIS_SSH_HOST']
+        if job.valid_data['CIS_QUEUE'] != "":
+            _queue = job.valid_data['CIS_QUEUE']
 
         # Check that maximum job limit is not exceeded
         try:
