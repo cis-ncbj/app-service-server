@@ -270,8 +270,10 @@ class Config(dict):
             self.log_config['handlers']['file']['filename'] = \
                 self.log_output
         if not self.log_email:
-            del self.log_config['handlers']['mail']
-            self.log_config['root']['handlers'].remove('mail')
+            if 'mail' in self.log_config['handlers'].keys():
+                del self.log_config['handlers']['mail']
+            if 'mail' in self.log_config['root']['handlers']:
+                self.log_config['root']['handlers'].remove('mail')
         else:
             self.log_config['handlers']['mail']['toaddrs'] = self.log_email
 
