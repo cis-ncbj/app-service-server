@@ -3,9 +3,15 @@
     "variables" : {
         // Sleep interval
         "SLEEP" : {
-            "type" : "int",
+            "type" : "float",
             "default" : 1,
-            "values" : [1,30]
+            "values" : [0,30]
+        },
+        // Norm
+        "Int" : {
+            "type" : "int",
+            "default" : 10,
+            "values" : [0,1000]
         },
         // Nominator
         "1Float" : {

@@ -160,7 +160,7 @@ class Validator(object):
                                    self.api_min, self.api_max):
             raise ValidatorError("@Validator - API level %s is not supported." %
                     _data['api'])
-        elif float(_data['api'] < self.api_current):
+        elif float(_data['api']) < self.api_current:
             # Deprecated API requested. Mark as such
             job.set_flag(JobState.FLAG_OLD_API)
 
