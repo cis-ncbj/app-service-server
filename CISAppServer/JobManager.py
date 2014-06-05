@@ -55,6 +55,8 @@ class JobManager(object):
         self.__w_counter_quota = {}
         for _s in ServiceStore.keys():
             self.__w_counter_quota[_s] = 0
+        # Time stamp for the last iteration
+        self.__time_stamp = datetime.utcnow()
         # Thread list
         self.__thread_list = []
 
@@ -610,12 +612,26 @@ class JobManager(object):
 
         _n = 0
         while(1):
-            time.sleep(conf.config_sleep_time)
-            if self.__queue_running:
+            # Calculate last iteration execute time
+            _exec_time = (datetime.utcnow() - self.__time_stamp).total_seconds()
+            # Calculate required sleep time
+            _dt = conf.config_sleep_time - _exec_time
+            if _dt < 0:
+                logger.error("@JobManager - Main loop execution behind schedule by "
+                      "%s seconds.", _dt)
+                _dt = 0
+            # Sleep
+            time.sleep(_dt)
+            # Store new time stamp
+            self.__time_stamp = datetime.utcnow()
+
+            # Execute loop
+            if self.__queue_running:  # Do not process queue in pause state
                 self.check_new_jobs()
             self.check_running_jobs()
             self.check_job_kill_requests()
             self.check_cleanup()
+            # Do not collect garbage every iteration
             if _n >= conf.config_garbage_step:
                 for _service in ServiceStore.keys():
                     self.collect_garbage(_service)
