@@ -846,7 +846,7 @@ class JobManager(object):
                 continue
 
             # Already marked for removal
-            if os.path.exits(os.path.join(conf.gate_path_delete, _jid)):
+            if os.path.exists(os.path.join(conf.gate_path_delete, _jid)):
                 continue
             _state = _job.get_state()
             _now = datetime.now()
