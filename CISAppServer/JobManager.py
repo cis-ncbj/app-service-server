@@ -168,10 +168,13 @@ class Job(object):
     def delete(self):
         """ Mark job for removal. """
         # Mark new state in the shared file system
-        os.symlink(
-            os.path.join(conf.gate_path_jobs, self.id),
-            os.path.join(conf.gate_path_delete, self.id)
-        )
+        # Skip if already marked
+        _target = os.path.join(conf.gate_path_delete, self.id)
+        if not os.path.exists(_target):
+            os.symlink(
+                os.path.join(conf.gate_path_jobs, self.id),
+                _target
+            )
 
     def mark(self, message, exit_code=ExitCodes.UserKill):
         """
@@ -775,12 +778,16 @@ class JobManager(object):
 
             # Stop if it is running
             if _job.get_state() in ('running', 'queued'):
+                # Skip jobs already marked for kill, wait for the scheduler to
+                # finish them off
+                if _job.get_exit_state() == 'killed':
+                    continue
                 self.schedulers[_job.valid_data['CIS_SCHEDULER']].stop(
                     _job, "User request", ExitCodes.Delete
                 )
                 continue
 
-            if _job.get_state() in ('cleanup', 'running'):
+            if _job.get_state() == 'cleanup':
                 continue
 
             try:
@@ -837,6 +844,10 @@ class JobManager(object):
             _delete_dt = self.services[_job.service].config['max_lifetime']
             if _delete_dt == 0:
                 continue
+
+            # Already marked for removal
+            if os.path.exits(os.path.join(conf.gate_path_delete, _jid)):
+                continue
             _state = _job.get_state()
             _now = datetime.now()
             _dt = timedelta(hours=_delete_dt)
@@ -851,6 +862,9 @@ class JobManager(object):
                 elif _state in ['done', 'failed']:
                     _path = os.path.join(conf.gate_path_output, _jid)
                 elif _state == 'running':
+                    # Wait for the scheduler to finish the job
+                    if _job.get_exit_state() == 'killed':
+                        continue
                     _path = os.path.join(conf.gate_path_running, _jid)
                     _delete_dt = self.services[
                         _job.service].config['max_runtime']
@@ -874,7 +888,11 @@ class JobManager(object):
             if _path_time < _now:
                 logger.info("@JManager - Job reached storage time limit. "
                             "Sheduling for removal.")
-                _job.delete()
+                try:
+                    _job.delete()
+                except:
+                    logger.error("@JManager - unable schedule job for removal.",
+                                 exc_info=True)
 
         # Remove finished threads
         for _thread in self.__thread_list:
@@ -965,7 +983,7 @@ class JobManager(object):
                 logger.debug("@JManager - Job garbage collected: %s." %
                              _job.id)
             except:
-                logger.warning("@JManager - unable schedule job for removal.",
+                logger.error("@JManager - unable schedule job for removal.",
                                exc_info=True)
             if _service.current_size < _water_mark:
                 break
@@ -1015,6 +1033,9 @@ class JobManager(object):
             if _state in ('done', 'failed', 'aborted', 'killed'):
                 continue
             if _state in ('queued', 'running'):
+                # Wait for the scheduler to finish the job
+                if _jon.get_exit_state() == "killed":
+                    continue
                 _scheduler = self.schedulers[_job.valid_data['CIS_SCHEDULER']]
                 _scheduler.stop(_job, 'Server shutdown', ExitCodes.Shutdown)
             else:
@@ -1022,6 +1043,7 @@ class JobManager(object):
                             exit_code=ExitCodes.Shutdown)
 
         time.sleep(conf.config_shutdown_time)
+        #@TODO Should call check_running_jobs??
         self.check_cleanup()
 
         for _job in self.__jobs.values():
