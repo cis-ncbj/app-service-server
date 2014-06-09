@@ -1139,31 +1139,31 @@ class PbsScheduler(Scheduler):
             return
 
         # Run qdel
-        try:
-            logger.debug("@PBS - Killing job")
-            # @TODO Seperate users for each sevice
-            # Run qdel with proper user permissions
-            # _user = self.jm.services[job.service].config['username']
-            # _comm = "/usr/bin/qdel %s" % _pbs_id
-            # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
-            # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
-            _opts = ['/usr/bin/qdel', _pbs_id]
-            verbose("@PBS - Running command: %s" % str(_opts))
-            _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-            _output = _proc.communicate()[0]
-            verbose(_output)
-            # Check return code. If qdel was not killed by signal Popen will
-            # not rise an exception
-            if _proc.returncode != 0:
-                raise OSError((
-                    _proc.returncode,
-                    "/usr/bin/qdel returned non zero exit code.\n%s" %
-                    str(_output)
-                ))
-        except:
-            job.die("@PBS - Unable to terminate job %s." %
-                    job.id(), exc_info=True)
-            return
+        logger.debug("@PBS - Killing job")
+        # @TODO Seperate users for each sevice
+        # Run qdel with proper user permissions
+        # _user = self.jm.services[job.service].config['username']
+        # _comm = "/usr/bin/qdel %s" % _pbs_id
+        # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
+        # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
+        _opts = ['/usr/bin/qdel', _pbs_id]
+        verbose("@PBS - Running command: %s" % str(_opts))
+        _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
+        _output = _proc.communicate()[0]
+        verbose(_output)
+        # Check return code. If qdel was not killed by signal Popen will
+        # not rise an exception
+        # @TODO handle temporary communication timeouts with pbs server
+        if _proc.returncode == 170: # Job in wrong state (e.g. exiting)
+            logger.debug("@PBS - Wait with job kill: /usr/bin/qdel "
+                         "returned 170 exit code (%s)" % _output)
+            raise CisError("PBS qdel wrong job state")
+        if _proc.returncode != 0:
+            raise OSError((
+                _proc.returncode,
+                "/usr/bin/qdel returned non zero exit code.\n%s" %
+                str(_output)
+            ))
 
         # Mark as killed by user
         job.mark(msg, exit_code)
@@ -1370,34 +1370,29 @@ class SshScheduler(Scheduler):
             job.die('@SSH - Unable to read PID', exc_info=True)
             return
 
-        # Run qdel
-        try:
-            logger.debug("@SSH - Killing job")
-            # Run qdel with proper user permissions
-            _usr = ServiceStore[job.status.service].config['username']
-            _queue = job.scheduler.queue
-            _shdel = os.path.join(
-                os.path.dirname(conf.daemon_path_installdir),
-                "Scripts"
-            )
-            _shdel = os.path.join(_shdel, "shdel")
-            _opts = ["/usr/bin/ssh", "-x", "-l", _usr, _queue, _shdel, _pid]
-            verbose("@SSH - Running command: %s" % str(_opts))
-            _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-            _output = _proc.communicate()[0]
-            verbose(_output)
-            # Check return code. If ssh was not killed by signal Popen will
-            # not rise an exception
-            if _proc.returncode != 0:
-                raise OSError((
-                    _proc.returncode,
-                    "shdel returned non zero exit code.\n%s" %
-                    str(_output)
-                ))
-        except:
-            job.die("@SSH - Unable to terminate job %s." %
-                    job.id(), exc_info=True)
-            return
+        # Run shdel
+        logger.debug("@SSH - Killing job")
+        # Run shdel with proper user permissions
+        _usr = ServiceStore[job.status.service].config['username']
+        _queue = job.scheduler.queue
+        _shdel = os.path.join(
+            os.path.dirname(conf.daemon_path_installdir),
+            "Scripts"
+        )
+        _shdel = os.path.join(_shdel, "shdel")
+        _opts = ["/usr/bin/ssh", "-x", "-l", _usr, _queue, _shdel, _pid]
+        verbose("@SSH - Running command: %s" % str(_opts))
+        _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
+        _output = _proc.communicate()[0]
+        verbose(_output)
+        # Check return code. If ssh was not killed by signal Popen will
+        # not rise an exception
+        if _proc.returncode != 0:
+            raise OSError((
+                _proc.returncode,
+                "shdel returned non zero exit code.\n%s" %
+                str(_output)
+            ))
 
         # Mark as killed by user
         job.mark(msg, exit_code)

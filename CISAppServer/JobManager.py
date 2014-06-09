@@ -11,7 +11,8 @@ import logging
 import threading
 from datetime import datetime, timedelta
 
-from Tools import Validator, ValidatorInputFileError, ValidatorError, PbsScheduler, SshScheduler, rmtree_error
+from Tools import Validator, ValidatorInputFileError, ValidatorError, \
+        CisError, PbsScheduler, SshScheduler, rmtree_error
 from Config import conf, verbose, ExitCodes
 from Jobs import Job, JobState, StateManager
 from DataStore import ServiceStore, SchedulerStore
@@ -55,6 +56,10 @@ class JobManager(object):
         self.__w_counter_quota = {}
         for _s in ServiceStore.keys():
             self.__w_counter_quota[_s] = 0
+        # Warning counter - slots
+        self.__w_counter_slots = {}
+        for _s in ServiceStore.keys():
+            self.__w_counter_slots[_s] = 0
         # Time stamp for the last iteration
         self.__time_stamp = datetime.utcnow()
         # Thread list
@@ -89,6 +94,23 @@ class JobManager(object):
         # Available job slots
         _new_slots = conf.config_max_jobs - _queue_count - _run_count - \
             _close_count - _clean_count
+
+        # Available job slots per service
+        _service_slots = {}
+        for (_service_name, _service) in ServiceStore.items():
+            # Count current active jobs
+            _service_queue_count = StateManager.get_job_count("queued",
+                    service=_service_name)
+            _service_run_count = StateManager.get_job_count("running",
+                    service=_service_name)
+            _service_close_count = StateManager.get_job_count("closing",
+                    service=_service_name)
+            _service_clean_count = StateManager.get_job_count("cleanup",
+                    service=_service_name)
+            # Available job slots
+            _service_slots[_service_name] = _service.config['max_jobs'] - \
+                    _service_queue_count - _service_run_count - \
+                    _service_close_count - _service_clean_count
 
         _i = 0
         for _job in StateManager.get_new_job_list():
@@ -155,29 +177,55 @@ class JobManager(object):
                          exc_info=True, exit_code=ExitCodes.Validate)
                 continue
 
-            # Check the service quota
             _service_name = _job.status.service
             _service = ServiceStore[_service_name]
+            # Check available service slots
+            if _service_slots[_service_name] <= 0:
+                # Limit the number of warning messages
+                if self.__w_counter_slots[_service_name] == 0:
+                    logger.warning(
+                        "@JManager - All job slots in use for service %s." %
+                        _service_name
+                    )
+                if self.__w_counter_slots[_service_name] > 9999:
+                    logger.error(
+                        "@JManager - All job slots in use for service %s. "
+                        "Message repeated 10000 times." %
+                        _service_name
+                    )
+                    self.__w_counter_slots[_service_name] = 0
+                else:
+                    self.__w_counter_slots[_service_name] += 1
+                continue
+            else:
+                self.__w_counter_slots[_service_name] = 0
+            # Check the service quota
             if _service.is_full():
                 # Limit the number of warning messages
-                if self.__w_counter_quota[_service_name] < \
-                   6 * 60 * 60 / conf.config_sleep_time:
-                    self.__w_counter_quota[_service_name] += 1
-                    if _service.current_size != \
-                       self.__last_service_size[_service_name]:
-                        logger.warning(
-                            "@JManager - Quota for service %s exceeded." %
-                            _service_name
-                        )
-                        self.__last_service_size[_service_name] = \
-                            _service.current_size
-                else:
+                if self.__w_counter_quota[_service_name] == 0:
+                    logger.warning(
+                        "@JManager - Quota for service %s exceeded." %
+                        _service_name
+                    )
+                    self.__last_service_size[_service_name] = \
+                        _service.current_size
+                if self.__w_counter_quota[_service_name] > 99:
                     logger.error(
                         "@JManager - Quota for service %s exceeded. "
                         "Message repeated 100 times." %
                         _service_name
                     )
                     self.__w_counter_quota[_service_name] = 0
+                else:
+                    if _service.current_size != \
+                       self.__last_service_size[_service_name]:
+                        self.__w_counter_quota[_service_name] += 1
+                        logger.warning(
+                            "@JManager - Quota for service %s exceeded." %
+                            _service_name
+                        )
+                        self.__last_service_size[_service_name] = \
+                            _service.current_size
                 # Flag the job to wait (no need to check the quota every tick)
                 _job.set_flag(JobState.FLAG_WAIT_QUOTA)
                 _job.status.wait_time = datetime.utcnow()
@@ -191,6 +239,7 @@ class JobManager(object):
                 if self.submit(_job):
                     _job.queue()
                     _service.add_job_proxy(_job)
+                    _service_slots[_service_name] -= 1
                 # Submit can return False when queue is full. Do not terminate
                 # job here so it can be resubmitted next time. If submission
                 # failed scheduler should have set job state to Aborted anyway.
@@ -292,9 +341,16 @@ class JobManager(object):
             # Stop if it is running
             if _job.get_state() == 'running' or \
                     _job.get_state() == 'queued':
-                SchedulerStore[_job.status.scheduler].stop(
-                    _job, 'User request', ExitCodes.UserKill
-                )
+                try:
+                    SchedulerStore[_job.status.scheduler].stop(
+                        _job, 'User request', ExitCodes.UserKill
+                    )
+                except CisError as e: # Temporary job stop problem
+                    continue
+                except:
+                    job.die("@PBS - Unable to terminate job %s." %
+                            _job.id(), exc_info=True)
+                    continue
             elif _job.get_state() == 'waiting':
                 _job.finish('User request', 'killed', ExitCodes.UserKill)
             else:
@@ -325,9 +381,15 @@ class JobManager(object):
 
             # Stop if it is running
             if _job.get_state() in ('running', 'queued'):
-                SchedulerStore[_job.status.scheduler].stop(
-                    _job, "User request", ExitCodes.Delete
-                )
+                try:
+                    SchedulerStore[_job.status.scheduler].stop(
+                        _job, 'User request', ExitCodes.Delete
+                    )
+                except CisError as e: # Temporary job stop problem
+                    continue
+                except:
+                    job.die("@PBS - Unable to terminate job %s." %
+                            _job.id(), exc_info=True)
                 continue
 
             if _job.get_state() in ('cleanup'):
@@ -562,16 +624,24 @@ class JobManager(object):
                 continue
             if _state in ('queued', 'running'):
                 _scheduler = SchedulerStore[_job.status.scheduler]
-                _scheduler.stop(_job, 'Server shutdown', ExitCodes.Shutdown)
+                try:
+                    _scheduler.stop(_job, 'Server shutdown', ExitCodes.Shutdown)
+                except CisError as e: # Temporary job stop problem
+                    continue
+                except:
+                    job.die("@PBS - Unable to terminate job %s." %
+                            _job.id(), exc_info=True)
+                continue
             else:
                 _job.finish('Server shutdown', state='killed',
                             exit_code=ExitCodes.Shutdown)
 
         time.sleep(conf.config_shutdown_time)
+        self.check_running_jobs()
         self.check_cleanup()
+        StateManager.commit()
         time.sleep(conf.config_shutdown_time)
 
-        #@TODO should we call commit?
         for _thread in self.__thread_list:
             # @TODO Kill the thread
             _thread.join()
