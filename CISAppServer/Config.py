@@ -111,7 +111,7 @@ class Config(dict):
                 'verbose': {
                     'format':
                     '%(levelname)s %(asctime)s %(module)s : %(message)s',
-                    'datefmt': '%m-%d %H:%M:%S',
+                    #'datefmt': '%m-%d %H:%M:%S',
                 },
                 'simple': {
                     'format': '%(levelname)s %(message)s'
