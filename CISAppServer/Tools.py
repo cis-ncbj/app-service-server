@@ -17,6 +17,7 @@ import stat
 import re
 import shutil
 import logging
+import spur
 #import time
 
 from subprocess import Popen, PIPE, STDOUT
@@ -1188,6 +1189,8 @@ class SshScheduler(Scheduler):
         self.max_jobs = conf.ssh_max_jobs
         #: Scheduler name
         self.name = "ssh"
+        #: Dictionary of ssh hosts and connection objects
+        self.hosts = {}
 
     def submit(self, job):
         """
@@ -1215,28 +1218,29 @@ class SshScheduler(Scheduler):
         _run_script = os.path.join(_work_dir, "pbs.sh")
         _output_log = os.path.join(_work_dir, "output.log")
 
+        # @TODO handle timouts etc ...
         try:
             # Submit
             logger.debug("@SSH - Submitting new job")
-            # Run qsub with proper user permissions
+            # Run shsub with proper user permissions
             _user = ServiceStore[job.status.service].config['username']
             _shsub = os.path.join(os.path.dirname(conf.daemon_path_installdir),
                                   "Scripts")
             _shsub = os.path.join(_shsub, "shsub")
-            _comm = "%s -i %s -d %s -o %s %s" % \
-                    (_shsub, job.id(), _work_dir, _output_log, _run_script)
-            _opts = ["/usr/bin/ssh", "-x", "-l", _user, _queue, _comm]
-            verbose("@SSH - Running command: %s" % str(_opts))
-            _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-            _output = _proc.communicate()[0]
+            _ssh = self.__get_ssh_connection(_queue, _user)
+            _comm = [_shsub, "-i", job.id(), "-d", _work_dir, "-o",
+                     _output_log, _run_script]
+            verbose("@SSH - Running command: %s" % str(_comm))
+            _result = _ssh.run(_comm)
+            _output = _result.output
             verbose(_output)
             # Hopefully shsub returned meaningful job ID
             _ssh_id = _output.strip()
             # Check return code. If ssh was not killed by signal Popen will
             # not rise an exception
-            if _proc.returncode != 0:
+            if _result.return_code != 0:
                 raise OSError((
-                    _proc.returncode,
+                    _result.return_code,
                     "shsub returned non zero exit code.\n%s" %
                     str(_output)
                 ))
@@ -1283,16 +1287,17 @@ class SshScheduler(Scheduler):
                         "Scripts"
                     )
                     _shstat = os.path.join(_shstat, "shstat")
-                    _opts = ["/usr/bin/ssh", "-x", "-l", _usr, _queue, _shstat]
+                    _ssh = self.__get_ssh_connection(_queue, _usr)
+                    _opts = [_shstat,]
                     verbose("@SSH - Running command: %s" % str(_opts))
-                    _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-                    _output = _proc.communicate()[0]
+                    _result = _ssh.run(_opts)
+                    _output = _result.output
                     verbose(_output)
                     # Check return code. If ssh was not killed by signal Popen
                     # will not rise an exception
-                    if _proc.returncode != 0:
+                    if _result.return_code != 0:
                         raise OSError((
-                            _proc.returncode,
+                            _result.return_code,
                             "shstat returned non zero exit code.\n%s" %
                             str(_output)
                         ))
@@ -1380,19 +1385,38 @@ class SshScheduler(Scheduler):
             "Scripts"
         )
         _shdel = os.path.join(_shdel, "shdel")
-        _opts = ["/usr/bin/ssh", "-x", "-l", _usr, _queue, _shdel, _pid]
+        _ssh = self.__get_ssh_connection(_queue, _usr)
+        _opts = [_shdel, _pid]
         verbose("@SSH - Running command: %s" % str(_opts))
-        _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-        _output = _proc.communicate()[0]
+        _result = _ssh.run(_opts)
+        _output = _result.output
         verbose(_output)
         # Check return code. If ssh was not killed by signal Popen will
         # not rise an exception
-        if _proc.returncode != 0:
+        if _result.return_code != 0:
             raise OSError((
-                _proc.returncode,
+                _result.return_code,
                 "shdel returned non zero exit code.\n%s" %
                 str(_output)
             ))
 
         # Mark as killed by user
         job.mark(msg, exit_code)
+
+    def __get_ssh_connection(self, host_name, user_name):
+        # @TODO How thread safe this is?
+        _login = "%s@%s" % (user_name, host_name)
+        if _login in self.hosts.keys():
+            return self.hosts[_login]
+        else:
+            _ssh = spur.SshShell( # Assume default private key is valid
+                    hostname=host_name,
+                    username=user_name,
+                    # Workaround for paramiko not understanding host ecdsa keys.
+                    # @TODO If possible disable such keys on sshd at host and
+                    # remove this from production code.
+                    missing_host_key=spur.ssh.MissingHostKey.accept
+                    )
+            self.hosts[_login] = _ssh
+            return _ssh
+

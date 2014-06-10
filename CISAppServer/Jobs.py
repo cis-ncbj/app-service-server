@@ -1135,6 +1135,7 @@ class FileStateManager(StateManager):
             logger.error(u"@FileStateManager - Unable to read directory: %s." %
                          _path, exc_info=True)
             return
+        verbose(u"@FileStateManager: Obtained job kill flags.")
 
         #@TODO should we use session??
         for _job in self.get_job_list(flag=JobState.FLAG_STOP):
@@ -1144,6 +1145,7 @@ class FileStateManager(StateManager):
         for _id in _list:
             _job = self.get_job(_id)
             _job.set_flag(JobState.FLAG_STOP)
+        verbose(u"@FileStateManager: Jobs flagged for kill.")
 
         # Delete flags
         _path = conf.gate_path_flag_delete
@@ -1153,6 +1155,7 @@ class FileStateManager(StateManager):
             logger.error(u"@FileStateManager - Unable to read directory: %s." %
                          _path, exc_info=True)
             return
+        verbose(u"@FileStateManager: Obtained job delete flags.")
 
         for _job in self.get_job_list(flag=JobState.FLAG_DELETE):
             if _job.id() in _list:
@@ -1161,6 +1164,7 @@ class FileStateManager(StateManager):
         for _id in _list:
             _job = self.get_job(_id)
             _job.set_flag(JobState.FLAG_DELETE)
+        verbose(u"@FileStateManager: Jobs flagged for delete.")
 
     def cleanup(self, status):
         """
