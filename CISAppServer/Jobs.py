@@ -365,6 +365,8 @@ class Job(Base):
         * waiting:
             job request was submitted and is waiting for JobManager to process
             it,
+        * processing:
+            job request was submitted and JobManager is processing it,
         * queued:
             job reuest was processed and is queued in the scheduling backend,
         * running:
@@ -815,8 +817,8 @@ class StateManager(object):
 
         :param state: Specifies state for which Jobs will be selected. To
             select all jobs specify 'all' as the state. Valid states consist of
-            job states and flags: waiting, queued, running, closing, cleanup,
-            done, failed, aborted, killed
+            job states and flags: waiting, processing, queued, running,
+            closing, cleanup, done, failed, aborted, killed
         :param service: if specified select only jobs that belong to selected
             service.
         :param flag: if specified select only jobs with the flag (or set of
@@ -861,8 +863,8 @@ class StateManager(object):
 
         :param str state: Specifies state for which Jobs will be selected. To
             select all jobs specify 'all' as the state. Valid states consist of
-            job states and flags: waiting, queued, running, closing, cleanup,
-            done, failed, aborted, killed
+            job states and flags: waiting, processing, queued, running,
+            closing, cleanup, done, failed, aborted, killed
         :param str service: if specified select only jobs that belong to
             selected service.
         :param int flag: if specified select only jobs with the flag (or set of
@@ -912,8 +914,8 @@ class StateManager(object):
             selected.
         :param str state: Specifies state for which Jobs will be selected. To
             select all jobs specify 'all' as the state. Valid states consist of
-            job states and flags: waiting, queued, running, closing, cleanup,
-            done, failed, aborted, killed
+            job states and flags: waiting, processing, queued, running,
+            closing, cleanup, done, failed, aborted, killed
         :param str service: if specified select only jobs that belong to
             selected service.
         :param int flag: if specified select only jobs with the flag (or set of
@@ -966,8 +968,8 @@ class StateManager(object):
             selected.
         :param state: Specifies state for which Jobs will be selected. To
             select all jobs specify 'all' as the state. Valid states consist of
-            job states and flags: waiting, queued, running, closing, cleanup,
-            done, failed, aborted, killed
+            job states and flags: waiting, processing, queued, running,
+            closing, cleanup, done, failed, aborted, killed
         :param service: if specified select only jobs that belong to selected
             service.
         :param flag: if specified select only jobs with the flag (or set of

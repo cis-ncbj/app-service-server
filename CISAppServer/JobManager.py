@@ -87,19 +87,22 @@ class JobManager(object):
 
         # Count current active jobs
         _queue_count = StateManager.get_job_count("queued")
+        _processing_count = StateManager.get_job_count("processing")
         _run_count = StateManager.get_job_count("running")
         _close_count = StateManager.get_job_count("closing")
         _clean_count = StateManager.get_job_count("cleanup")
 
         # Available job slots
-        _new_slots = conf.config_max_jobs - _queue_count - _run_count - \
-            _close_count - _clean_count
+        _new_slots = conf.config_max_jobs - _queue_count - _processing_count -\
+            _run_count - _close_count - _clean_count
 
         # Available job slots per service
         _service_slots = {}
         for (_service_name, _service) in ServiceStore.items():
             # Count current active jobs
             _service_queue_count = StateManager.get_job_count("queued",
+                    service=_service_name)
+            _service_processing_count = StateManager.get_job_count("processing",
                     service=_service_name)
             _service_run_count = StateManager.get_job_count("running",
                     service=_service_name)
@@ -267,7 +270,8 @@ class JobManager(object):
                 # Scheduler can change state for only running and waiting jobs.
                 # Disregard the rest.
                 _state = _job.get_state()
-                if _state == 'closing' or _state == 'cleanup':
+                if _state == 'closing' or _state == 'cleanup' or \
+                        _state == 'processing':
                     continue
                 elif _state == 'running' or _state == 'queued':
                     _jobs_active.append(_job)
@@ -338,6 +342,9 @@ class JobManager(object):
             logger.debug('@JManager - Detected job marked for a kill: %s' %
                          _job.id())
 
+            # Wait for the job submission thread to finish
+            if _job.get_state() == 'processing':
+                continue
             # Stop if it is running
             if _job.get_state() == 'running' or \
                     _job.get_state() == 'queued':
@@ -392,7 +399,8 @@ class JobManager(object):
                             _job.id(), exc_info=True)
                 continue
 
-            if _job.get_state() in ('cleanup'):
+            # Wait for job submission or finalisation threads to finish
+            if _job.get_state() in ('processing', 'cleanup', 'closing'):
                 continue
 
             # Remove the output directory and its contents
@@ -469,6 +477,7 @@ class JobManager(object):
         """
 
         _waiting = StateManager.get_job_count('waiting')
+        _processing = StateManager.get_job_count('processing')
         _queued = StateManager.get_job_count('queued')
         _running = StateManager.get_job_count('running')
         _closing = StateManager.get_job_count('closing')
@@ -478,9 +487,9 @@ class JobManager(object):
         _aborted = StateManager.get_job_count('aborted')
         _killed = StateManager.get_job_count('killed')
 
-        logger.debug("Jobs - w:%s, q:%s, r:%s, s:%s, c:%s, d:%s, f:%s, a:%s, "
-                "k:%s." % (_waiting, _queued, _running, _closing, _cleanup,
-                    _done, _failed, _aborted, _killed))
+        logger.debug("Jobs - w:%s, p:%s, q:%s, r:%s, s:%s, c:%s, d:%s, f:%s, "
+                "a:%s, k:%s." % (_waiting, _processing, _queued, _running,
+                    _closing, _cleanup, _done, _failed, _aborted, _killed))
 
     def check_finished_threads(self):
         """Check for cleanup threads that finished execution.
@@ -618,10 +627,13 @@ class JobManager(object):
         """
         Stop all running jobs.
         """
+        # Wait for processing threads to finish
+        time.sleep(conf.config_shutdown_time)
+        StateManager.expire_session()
+
+        # Kill running, queued and waiting jobs
         for _job in StateManager.get_job_list():
             _state = _job.get_state()
-            if _state in ('done', 'failed', 'aborted', 'killed'):
-                continue
             if _state in ('queued', 'running'):
                 _scheduler = SchedulerStore[_job.status.scheduler]
                 try:
@@ -632,14 +644,15 @@ class JobManager(object):
                     job.die("@PBS - Unable to terminate job %s." %
                             _job.id(), exc_info=True)
                 continue
-            else:
+            elif _state == 'waiting':
                 _job.finish('Server shutdown', state='killed',
                             exit_code=ExitCodes.Shutdown)
 
+        # Wait for PBS to kill the jobs
         time.sleep(conf.config_shutdown_time)
+        # Check for jobs that got killed and lunch cleanup
         self.check_running_jobs()
         self.check_cleanup()
-        StateManager.commit()
         time.sleep(conf.config_shutdown_time)
 
         for _thread in self.__thread_list:
@@ -649,6 +662,7 @@ class JobManager(object):
             StateManager.expire_session()
             logger.debug("@JManager - Removed finished cleanup thread.")
 
+        # Force killed state on leftovers
         for _job in StateManager.get_job_list():
             _state = _job.get_state()
             if _state in ('done', 'failed', 'aborted', 'killed'):
@@ -657,6 +671,9 @@ class JobManager(object):
                 _job.finish('Server shutdown', state='killed',
                             exit_code=ExitCodes.Shutdown)
                 _job.exit()
+
+        # Pass the final state to AppGw
+        StateManager.commit()
 
     def stop(self):
         """

@@ -169,8 +169,8 @@ class Config(dict):
         #: Valid job states as well as names of directories on shared storage
         #: that are used to monitor job states
         self.service_states = (
-            'new', 'waiting', 'queued', 'running', 'closing', 'cleanup',
-            'done', 'failed', 'aborted', 'killed',
+            'new', 'waiting', 'processing', 'queued', 'running', 'closing',
+            'cleanup', 'done', 'failed', 'aborted', 'killed',
         )
         #: Valid job flags
         self.service_flags = (
@@ -221,6 +221,8 @@ class Config(dict):
         self.gate_path_new = None
         #: Path where waiting jobs are symlinked
         self.gate_path_waiting = None
+        #: Path where jobs during submission are symlinked
+        self.gate_path_processing = None
         #: Path where queued jobs are symlinked
         self.gate_path_queued = None
         #: Path where running jobs are symlinked
@@ -247,6 +249,7 @@ class Config(dict):
         self.gate_path = {
             "new": None,
             "waiting": None,
+            "processing": None,
             "queued": None,
             "running": None,
             "closing": None,
@@ -335,6 +338,7 @@ class Config(dict):
         # Generate job state subdirs
         self.gate_path_new = os.path.join(self.gate_path_shared, 'new')
         self.gate_path_waiting = os.path.join(self.gate_path_shared, 'waiting')
+        self.gate_path_processing = os.path.join(self.gate_path_shared, 'processing')
         self.gate_path_queued = os.path.join(self.gate_path_shared, 'queued')
         self.gate_path_running = os.path.join(self.gate_path_shared, 'running')
         self.gate_path_closing = os.path.join(self.gate_path_shared, 'closing')
@@ -346,6 +350,7 @@ class Config(dict):
         self.gate_path = {
             "new": self.gate_path_new,
             "waiting": self.gate_path_waiting,
+            "processing": self.gate_path_processing,
             "queued": self.gate_path_queued,
             "running": self.gate_path_running,
             "closing": self.gate_path_closing,
@@ -378,6 +383,7 @@ class Config(dict):
             "gate_path_flag_old_api",
             "gate_path_new",
             "gate_path_waiting",
+            "gate_path_processing",
             "gate_path_queued",
             "gate_path_running",
             "gate_path_cleanup",
