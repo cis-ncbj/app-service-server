@@ -238,18 +238,21 @@ class JobManager(object):
                     _service.current_size
                 self.__w_counter_quota[_service_name] = 0
 
+            # Run submit in separate threads
             try:
-                if self.submit(_job):
-                    _job.queue()
-                    _service.add_job_proxy(_job)
-                    _service_slots[_service_name] -= 1
-                # Submit can return False when queue is full. Do not terminate
-                # job here so it can be resubmitted next time. If submission
-                # failed scheduler should have set job state to Aborted anyway.
+                # Mark job as in processing state
+                _job.processing()
+                StateManager.commit()
+                _thread = threading.Thread(
+                    target=self.submit, args=(_job.id(),))
+                _thread.start()
+                self.__thread_list.append(_thread)
+                logger.debug("@JManager - Submit thread started "
+                             "for job %s" % _job.id())
+                _service_slots[_service_name] -= 1
             except:
-                _job.die("@JManager - Cannot start job %s." % _job.id(),
-                         exc_info=True)
-                continue
+                logger.error("@JManager - Unable to start submit thread "
+                             "for job %s" % _job.id(), exc_info=True)
 
             _i += 1
 
@@ -498,14 +501,18 @@ class JobManager(object):
 
         verbose('@JManager - Check for finished cleanup threads.')
 
+        _clean = True
+
         #@TODO should we call commit?
         # Remove finished threads
         for _thread in self.__thread_list:
             if not _thread.is_alive():
                 _thread.join()
                 self.__thread_list.remove(_thread)
-                StateManager.expire_session()
-                logger.debug("@JManager - Removed finished cleanup thread.")
+                _clean = False
+                logger.debug("@JManager - Removed finished subthread.")
+        if not _clean:
+            StateManager.expire_session()
 
     def collect_garbage(self, service, full=False):
         """
@@ -606,22 +613,49 @@ class JobManager(object):
 
         return False
 
-    def submit(self, job):
+    def submit(self, jid):
         """
         Generate job related scripts and submit them to selected scheduler.
 
         :param job: The Job object to submit.
         :return: True on success, False otherwise.
         """
+        try:
+            _session = StateManager.new_session()
+            _job = StateManager.get_job(jid, _session)
+        except:
+            logger.error("@JobManager - Unable to connect to DB.",
+                         exc_info=True)
+            return
+
         # During validation default values are set in Job.valid_data
         # Now we can access scheduler selected for current Job
-        _scheduler = SchedulerStore[job.status.scheduler]
+        try:
+            _scheduler = SchedulerStore[_job.status.scheduler]
+            _service = ServiceStore[_job.status.service]
+        except:
+            logger.error("@JobManager - Unable to obtain scheduler and "
+                         "service instance.", exc_info=True)
+            return
         # Ask scheduler to generate scripts and submit the job
-        if _scheduler.generate_scripts(job):
-            if _scheduler.chain_input_data(job):
-                return _scheduler.submit(job)
+        try:
+            if _scheduler.generate_scripts(_job):
+                if _scheduler.chain_input_data(_job):
+                    if _scheduler.submit(_job):
+                        _job.queue()
+                        _service.add_job_proxy(_job)
+        except:
+            logger.error("@JobManager - Unable to submit job.", exc_info=True)
+            return
 
-        return False
+        try:
+            StateManager.commit(_session)
+            _session.close()
+        except:
+            logger.error("@JobManager - Unable to finalize job submission.",
+                         exc_info=True)
+            return
+        logger.debug("@JobManager - job submitted: %s" % jid)
 
     def shutdown(self):
         """

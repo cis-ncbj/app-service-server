@@ -409,6 +409,10 @@ class Job(Base):
 
         return self.status.exit_state
 
+    def processing(self):
+        """ Mark job as in processing state. """
+        self.__set_state('processing')
+
     def queue(self):
         """ Mark job as queued. """
         self.__set_state('queued')
