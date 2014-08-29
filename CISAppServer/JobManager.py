@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 
 from Tools import Validator, ValidatorInputFileError, ValidatorError, \
         CisError, PbsScheduler, SshScheduler, rmtree_error
-from Config import conf, verbose, ExitCodes
+from Config import conf, VERBOSE, ExitCodes
 from Jobs import Job, JobState, StateManager
 from DataStore import ServiceStore, SchedulerStore
 
@@ -77,7 +77,7 @@ class JobManager(object):
         If found try to submit them to selected job scheduler.
         """
 
-        verbose('@JManager - Check for new jobs.')
+        logger.log(VERBOSE, '@JManager - Check for new jobs.')
 
         _now = datetime.utcnow()
         # Wait timeout
@@ -95,6 +95,8 @@ class JobManager(object):
         # Available job slots
         _new_slots = conf.config_max_jobs - _queue_count - _processing_count -\
             _run_count - _close_count - _clean_count
+
+        logger.log(VERBOSE, '@JManager - Free job slots: %s.', _new_slots)
 
         # Available job slots per service
         _service_slots = {}
@@ -114,6 +116,8 @@ class JobManager(object):
             _service_slots[_service_name] = _service.config['max_jobs'] - \
                     _service_queue_count - _service_run_count - \
                     _service_close_count - _service_clean_count
+
+        logger.log(VERBOSE, '@JManager - Free service slots: %s.', _service_slots)
 
         _i = 0
         for _job in StateManager.get_new_job_list():
@@ -145,17 +149,20 @@ class JobManager(object):
                     _wait_time = _job.status.wait_time
                     _wait_time += _dt
                     if _wait_time > _now:
-                        verbose('@JManager - Job %s in wait state. End: %s, Now: %s.' % (_job.id(), _wait_time, _now))
+                        logger.log(VERBOSE,
+                                '@JManager - Job %s in wait state. End: %s, '
+                                'Now: %s.', _job.id(), _wait_time, _now)
                         continue
                     else:
-                        verbose('@JManager - Job %s wait finished.' % _job.id())
+                        logger.log(VERBOSE, '@JManager - Job %s wait finished.',
+                                _job.id())
                         if _wait_input:
                             _job.set_flag(JobState.FLAG_WAIT_INPUT, remove=True)
                         if _wait_quota:
                             _job.set_flag(JobState.FLAG_WAIT_QUOTA, remove=True)
             except:
-                verbose('@JManager - Wait flag extraction failed for job %s.' % _job.id(),
-                        exc_info=True)
+                logger.log(VERBOSE, '@JManager - Wait flag extraction failed '
+                        'for job %s.', _job.id(), exc_info=True)
                 # Let's ignore exceptions and treat such jobs as without wait
                 # flags
                 pass
@@ -169,7 +176,7 @@ class JobManager(object):
                 # The input file is not available yet. Flag the job to wait.
                 _job.set_flag(JobState.FLAG_WAIT_INPUT)
                 _job.status.wait_time = datetime.utcnow()
-                verbose('@JManager - Job flagged to wait for input.')
+                logger.log(VERBOSE, '@JManager - Job flagged to wait for input.')
                 continue
             except ValidatorError as e:
                 _job.die("@JManager - Job %s validation failed." % _job.id(),
@@ -240,21 +247,25 @@ class JobManager(object):
 
             # Run submit in separate threads
             try:
-                # Mark job as in processing state
+                # Mark job as in processing state and commit to DB
                 _job.processing()
                 StateManager.commit()
+                # The sub thread cannot use the same Job instance or the same
+                # DB session as the main one. Pass the JobID istead so that the
+                # thread can create its own instances.
                 _thread = threading.Thread(
-                    target=self.submit, args=(_job.id(),))
+                        target=self.submit, args=(_job.id(),),
+                        name="Submit_%s"%_job.id()[0:15])
                 _thread.start()
                 self.__thread_list.append(_thread)
                 logger.debug("@JManager - Submit thread started "
                              "for job %s" % _job.id())
-                _service_slots[_service_name] -= 1
+                _service_slots[_service_name] -= 1  # Mark slot as used
             except:
                 logger.error("@JManager - Unable to start submit thread "
                              "for job %s" % _job.id(), exc_info=True)
 
-            _i += 1
+            _i += 1  # Mark slot as used
 
     def check_running_jobs(self):
         """
@@ -263,7 +274,7 @@ class JobManager(object):
         Finished jobs will be marked for finalisation
         """
 
-        verbose('@JManager - Check state of running jobs.')
+        logger.log(VERBOSE, '@JManager - Check state of running jobs.')
 
         # Loop over supported schedulers
         for _sname, _scheduler in SchedulerStore.items():
@@ -292,7 +303,7 @@ class JobManager(object):
         Starts the cleanup for the jobs in separate threads.
         """
 
-        verbose('@JManager - Check for jobs marked for cleanup.')
+        logger.log(VERBOSE, '@JManager - Check for jobs marked for cleanup.')
 
         for _job in StateManager.get_job_list("closing"):
             logger.debug('@JManager - Detected cleanup job %s.' % _job.id())
@@ -306,24 +317,24 @@ class JobManager(object):
             _scheduler = SchedulerStore[_job.status.scheduler]
             # Run cleanup in separate threads
             try:
-                # Mark job as in cleanup state
+                # Mark job as in cleanup state and commit to DB
                 _job.cleanup()
                 StateManager.commit()
-                # Create thread local DB session
-                # Move the job to the thread local DB session
-                #StateManager.detach_job(_job)
-                #StateManager.attach_job(_job, _session)
-                #_job = StateManager.get_job(_job.id(), _session)
+                # The sub thread cannot use the same Job instance or the same
+                # DB session as the main one. Pass the JobID istead so that the
+                # thread can create its own instances.
                 if _job.get_exit_state() == 'aborted':
                     _thread = threading.Thread(
-                        target=_scheduler.abort, args=(_job.id(),))
+                        target=_scheduler.abort, args=(_job.id(),),
+                        name="Abort_%s"%_job.id()[0:15])
                     _thread.start()
                     self.__thread_list.append(_thread)
                     logger.debug("@JManager - Abort cleanup thread started "
                                  "for job %s" % _job.id())
                 else:
                     _thread = threading.Thread(
-                        target=_scheduler.finalise, args=(_job.id(),))
+                        target=_scheduler.finalise, args=(_job.id(),),
+                        name="Final_%s"%_job.id()[0:15])
                     _thread.start()
                     self.__thread_list.append(_thread)
                     logger.debug("@JManager - Finalise cleanup thread started "
@@ -339,7 +350,7 @@ class JobManager(object):
         If found and job is still running kill it.
         """
 
-        verbose('@JManager - Check for kill requests.')
+        logger.log(VERBOSE, '@JManager - Check for kill requests.')
 
         for _job in StateManager.get_job_list(flag=JobState.FLAG_STOP):
             logger.debug('@JManager - Detected job marked for a kill: %s' %
@@ -382,7 +393,7 @@ class JobManager(object):
         running kill it.
         """
 
-        verbose('@JManager - Check for delete requests.')
+        logger.log(VERBOSE, '@JManager - Check for delete requests.')
 
         for _job in StateManager.get_job_list(flag=JobState.FLAG_DELETE):
             _jid = _job.id()
@@ -433,12 +444,14 @@ class JobManager(object):
 
         If found mark them for removal."""
 
-        verbose('@JManager - Check for expired jobs.')
+        logger.log(VERBOSE, '@JManager - Check for expired jobs.')
 
         for _job in StateManager.get_job_list():
+            # Skip jobs already flagged for removal
             if _job.get_flag(JobState.FLAG_DELETE):
                 continue
 
+            # Check the MAX job lifetime defined by the service
             _delete_dt = ServiceStore[_job.status.service].config['max_lifetime']
             if _delete_dt == 0:
                 continue
@@ -450,26 +463,27 @@ class JobManager(object):
             try:
                 if _state in ('done', 'failed', 'killed', 'aborted'):
                     _path_time = _job.status.stop_time
-                elif _state == 'running':
+                elif _state == 'running':  # For running jobs use the MAX runtime
                     _path_time = _job.status.start_time
                     _delete_dt = \
                         ServiceStore[_job.status.service].config['max_runtime']
                     _dt = timedelta(hours=_delete_dt)
-                else:
+                else:  # Jobs in other states are not affected
                     continue
 
-                verbose("@JManager - Removal dt: %s" % _dt)
-                verbose("@JManager - Job time: %s" % _path_time)
-                verbose("@JManager - Current time: %s" % _now)
-                verbose("@JManager - Time diff: %s" %
+                logger.log(VERBOSE, "@JManager - Removal dt: %s", _dt)
+                logger.log(VERBOSE, "@JManager - Job time: %s", _path_time)
+                logger.log(VERBOSE, "@JManager - Current time: %s", _now)
+                logger.log(VERBOSE, "@JManager - Time diff: %s",
                         (_path_time + _dt - _now))
-                _path_time += _dt
+                _path_time += _dt  # Calculate the removal time stamp
             except:
                 logger.error(
                     "@JManager - Unable to extract job change time: %s." %
                     _job.id(), exc_info=True)
                 continue
 
+            # Was the removal time stamp already passed?
             if _path_time < _now:
                 logger.info("@JManager - Job reached storage time limit. "
                             "Sheduling for removal.")
@@ -477,6 +491,7 @@ class JobManager(object):
 
     def report_jobs(self):
         """
+        Log the current queue state.
         """
 
         _waiting = StateManager.get_job_count('waiting')
@@ -499,11 +514,10 @@ class JobManager(object):
 
         If found finalise them."""
 
-        verbose('@JManager - Check for finished cleanup threads.')
+        logger.log(VERBOSE, '@JManager - Check for finished cleanup threads.')
 
         _clean = True
 
-        #@TODO should we call commit?
         # Remove finished threads
         for _thread in self.__thread_list:
             if not _thread.is_alive():
@@ -529,7 +543,7 @@ class JobManager(object):
         :return: True if quota is not reached or garbage collection succeeded.
         """
 
-        verbose('@JManager - Garbage collect.')
+        logger.log(VERBOSE, '@JManager - Garbage collect.')
 
         # Get Service instance
         _service = ServiceStore[service]

@@ -19,16 +19,6 @@ logger = logging.getLogger(__name__)
 VERBOSE = 5
 
 
-def verbose(msg, exc_info=False):
-    """
-    Log message with VERBOSE log level.
-
-    VERBOSE log level is higher than DEBUG and should be used for large debug
-    messages, e.g. data dumps, output from subprocesses, etc.
-    """
-    logger.log(VERBOSE, msg, exc_info=exc_info)
-
-
 class ExitCodes:
     """
     Job exit codes enum:
@@ -110,11 +100,16 @@ class Config(dict):
             'formatters': {
                 'verbose': {
                     'format':
-                    '%(levelname)s %(asctime)s %(module)s : %(message)s',
+                    '%(levelname)7s %(asctime)s : %(message)s',
+                    #'datefmt': '%m-%d %H:%M:%S',
+                },
+                'debug': {
+                    'format':
+                    '== %(levelname)7s %(asctime)s [%(threadName)s:%(filename)s:%(lineno)s - %(funcName)s()] :\n%(message)s',
                     #'datefmt': '%m-%d %H:%M:%S',
                 },
                 'simple': {
-                    'format': '%(levelname)s %(message)s'
+                    'format': '%(levelname)7s %(message)s'
                 },
             },
             'handlers': {
@@ -281,7 +276,8 @@ class Config(dict):
             self.config_file = conf_name
             with open(self.config_file) as _conf_file:
                 _conf = self.json_load(_conf_file)
-            logger.log(VERBOSE, json.dumps(_conf))
+            if logger.getEffectiveLevel() <= VERBOSE:
+                logger.log(VERBOSE, json.dumps(_conf))
             self.update(_conf)
 
         logger.debug('@Config - Finalise configuration initialisation')
@@ -296,6 +292,9 @@ class Config(dict):
             for _key in self.log_config['handlers'].keys():
                 if _key != 'mail':
                     self.log_config['handlers'][_key]['level'] = self.log_level
+                if _key == 'file' and \
+                    (self.log_level == 'DEBUG' or self.log_level == 'VERBOSE'):
+                    self.log_config['handlers'][_key]['formatter'] = 'debug'
             self.log_config['root']['level'] = self.log_level
         if self.log_output is not None and \
            'file' in self.log_config['handlers'].keys():
@@ -314,8 +313,8 @@ class Config(dict):
             if '_path_' in _key and isinstance(_value, (str, unicode)):
                 logger.log(
                     VERBOSE,
-                    '@Config - Correct path to full one: %s -> %s.' %
-                    (_key, _value)
+                    '@Config - Correct path to full one: %s -> %s.',
+                    _key, _value
                 )
                 self[_key] = os.path.realpath(_value)
 
@@ -401,7 +400,6 @@ class Config(dict):
             if not os.path.isdir(self[_path]):
                 self.mkdir_p(self[_path])
 
-        logger.log(VERBOSE, self)
 
     def json_load(self, file):
         """

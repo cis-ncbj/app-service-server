@@ -23,7 +23,7 @@ import spur
 from subprocess import Popen, PIPE, STDOUT
 from yapsy.PluginManager import PluginManager
 
-from Config import conf, verbose, ExitCodes
+from Config import conf, VERBOSE, ExitCodes
 from DataStore import Service, ServiceStore
 from Jobs import JobData, JobState, JobChain, StateManager, SchedulerQueue
 
@@ -104,7 +104,8 @@ class Validator(object):
                 _plugins.append(_plugin_dir)
 
             logger.info("Initialized service: %s" % _service)
-        verbose(json.dumps(ServiceStore))
+        if logger.getEffectiveLevel() <= VERBOSE:
+            logger.log(VERBOSE, json.dumps(ServiceStore))
 
         # Load plugins
         self.pm.setPluginPlaces(_plugins)
@@ -135,7 +136,7 @@ class Validator(object):
         with open(_name) as _f:
             _data = json.load(_f)
         logger.debug(u'@Job - Loaded data file %s.' % job.id())
-        verbose(_data)
+        logger.log(VERBOSE, _data)
 
         # Check if data contains service attribute and that such service was
         # initialized
@@ -276,8 +277,8 @@ class Validator(object):
 
         # Update job data with default values
         job.data = JobData(data=_variables)
-        verbose('@Validator - Validated input data:')
-        verbose(_variables)
+        logger.log(VERBOSE, '@Validator - Validated input data:')
+        logger.log(VERBOSE, _variables)
 
     def validate_value(self, key, value, service):
         """
@@ -549,7 +550,7 @@ class Scheduler(object):
         # Output job progress log if it exists
         # The progres log is extraced every n-th status check
         if Scheduler.__progress_step >= conf.config_progress_step:
-            verbose("@Scheduler - Extracting progress log (%s)" % job.id())
+            logger.log(VERBOSE, "@Scheduler - Extracting progress log (%s)", job.id())
             _work_dir = os.path.join(self.work_path, job.id())
             _output_dir = os.path.join(conf.gate_path_output, job.id())
             _progress_file = os.path.join(_work_dir, 'progress.log')
@@ -558,7 +559,7 @@ class Scheduler(object):
                     if not os.path.isdir(_output_dir):
                         os.mkdir(_output_dir)
                     shutil.copy(_progress_file, _output_dir)
-                    verbose('@Scheduler - Progress log extracted')
+                    logger.log(VERBOSE, '@Scheduler - Progress log extracted')
                 except:
                     logger.error(
                         '@Scheduler - Cannot copy progress.log',
@@ -989,11 +990,11 @@ class PbsScheduler(Scheduler):
             _opts = ['/usr/bin/qsub', '-q', _queue, '-d', _work_dir, '-j',
                      'oe', '-o', _output_log, '-l', 'epilogue=epilogue.sh',
                      _run_script]
-            verbose("@PBS - Running command: %s" % str(_opts))
+            logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
             _proc = Popen(_opts, stdout=PIPE, stderr=PIPE)
             _out = _proc.communicate()
             _output = _out[0]
-            verbose(_out)
+            logger.log(VERBOSE, _out)
             # Hopefully qsub returned meaningful job ID
             _pbs_id = _output.strip()
             # Check return code. If qsub was not killed by signal Popen will
@@ -1034,12 +1035,12 @@ class PbsScheduler(Scheduler):
         for _usr in _users:
             try:
                 # Run qstat
-                verbose("@PBS - Check jobs state for user %s" % _usr)
+                logger.log(VERBOSE, "@PBS - Check jobs state for user %s", _usr)
                 _opts = ["/usr/bin/qstat", "-f", "-x", "-u", _usr]
-                verbose("@PBS - Running command: %s" % str(_opts))
+                logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
                 _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
                 _output = _proc.communicate()[0]
-                verbose(_output)
+                logger.log(VERBOSE, _output)
                 # Check return code. If qstat was not killed by signal Popen
                 # will not rise an exception
                 if _proc.returncode != 0:
@@ -1067,7 +1068,7 @@ class PbsScheduler(Scheduler):
                 logger.error("@PBS - Unable to parse qstat output.",
                              exc_info=True)
                 return
-            verbose(_job_states)
+            logger.log(VERBOSE, _job_states)
 
         # Iterate through jobs
         for _job in jobs:
@@ -1081,8 +1082,8 @@ class PbsScheduler(Scheduler):
                 _new_state = 'queued'
                 _exit_code = 0
                 _state = _job_states[_pbs_id]
-                verbose("@PBS - Current job state: '%s' (%s)" %
-                        (_state[0], _job.id()))
+                logger.log(VERBOSE, "@PBS - Current job state: '%s' (%s)",
+                        _state[0], _job.id())
                 # Job has finished. Check the exit code.
                 if _state[0] == 'C':
                     _new_state = 'done'
@@ -1152,10 +1153,10 @@ class PbsScheduler(Scheduler):
         # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
         # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
         _opts = ['/usr/bin/qdel', _pbs_id]
-        verbose("@PBS - Running command: %s" % str(_opts))
+        logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
         _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
         _output = _proc.communicate()[0]
-        verbose(_output)
+        logger.log(VERBOSE, _output)
         # Check return code. If qdel was not killed by signal Popen will
         # not rise an exception
         # @TODO handle temporary communication timeouts with pbs server
@@ -1237,10 +1238,10 @@ class SshScheduler(Scheduler):
             _ssh = self.__get_ssh_connection(_queue, _user)
             _comm = [_shsub, "-i", job.id(), "-d", _work_dir, "-o",
                      _output_log, _run_script]
-            verbose("@SSH - Running command: %s" % str(_comm))
+            logger.log(VERBOSE, "@SSH - Running command: %s", _comm)
             _result = _ssh.run(_comm)
             _output = _result.output
-            verbose(_output)
+            logger.log(VERBOSE, _output)
             # Hopefully shsub returned meaningful job ID
             _ssh_id = _output.strip()
             # Check return code. If ssh was not killed by signal Popen will
@@ -1287,8 +1288,8 @@ class SshScheduler(Scheduler):
             for _queue in _queues:
                 try:
                     # Run shtat
-                    verbose("@SSH - Check jobs state for user %s @ %s" %
-                                 (_usr, _queue))
+                    logger.log(VERBOSE, "@SSH - Check jobs state for user %s @ %s",
+                                 _usr, _queue)
                     _shstat = os.path.join(
                         os.path.dirname(conf.daemon_path_installdir),
                         "Scripts"
@@ -1296,10 +1297,10 @@ class SshScheduler(Scheduler):
                     _shstat = os.path.join(_shstat, "shstat")
                     _ssh = self.__get_ssh_connection(_queue, _usr)
                     _opts = [_shstat,]
-                    verbose("@SSH - Running command: %s" % str(_opts))
+                    logger.log(VERBOSE, "@SSH - Running command: %s", _opts)
                     _result = _ssh.run(_opts)
                     _output = _result.output
-                    verbose(_output)
+                    logger.log(VERBOSE, _output)
                     # Check return code. If ssh was not killed by signal Popen
                     # will not rise an exception
                     if _result.return_code != 0:
@@ -1394,10 +1395,10 @@ class SshScheduler(Scheduler):
         _shdel = os.path.join(_shdel, "shdel")
         _ssh = self.__get_ssh_connection(_queue, _usr)
         _opts = [_shdel, _pid]
-        verbose("@SSH - Running command: %s" % str(_opts))
+        logger.log(VERBOSE, "@SSH - Running command: %s", _opts)
         _result = _ssh.run(_opts)
         _output = _result.output
-        verbose(_output)
+        logger.log(VERBOSE, _output)
         # Check return code. If ssh was not killed by signal Popen will
         # not rise an exception
         if _result.return_code != 0:

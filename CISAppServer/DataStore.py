@@ -6,7 +6,7 @@ import logging
 
 from collections import OrderedDict
 
-from Config import conf, verbose
+from Config import conf, VERBOSE
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +78,8 @@ class Service(dict):
 
         self.current_size += self.config['job_size']
         self.__job_proxies.append(job.id())
-        verbose("@Service - Allocated %s MB for job proxy (%s)." %
-                ((self.config['job_size']/1000000), self.name))
+        logger.log(VERBOSE, "@Service - Allocated %s MB for job proxy (%s).",
+                (self.config['job_size']/1000000), self.name)
 
     def remove_job_proxy(self, job):
         """
@@ -93,8 +93,8 @@ class Service(dict):
             self.__job_proxies.remove(job.id())
             self.current_size -= job.get_size()
 
-        verbose("@Service - Reclaimed %s MB of storage from soft "
-                "quota (%s)." % ((job.get_size()/1000000), self.name))
+        logger.log(VERBOSE, "@Service - Reclaimed %s MB of storage from soft "
+                "quota (%s).", (job.get_size()/1000000), self.name)
 
     def update_job(self, job):
         """
@@ -119,8 +119,8 @@ class Service(dict):
         _change += job.get_size()
         self.current_size += job.get_size()
         self.real_size += job.get_size()
-        verbose("@Service - Storage usage adjusted by %s MB (%s)." %
-                ((_change/1000000), self.name))
+        logger.log(VERBOSE, "@Service - Storage usage adjusted by %s MB (%s).",
+                (_change/1000000), self.name)
 
     def remove_job(self, job):
         """
@@ -136,8 +136,8 @@ class Service(dict):
             self.current_size -= job.get_size()
         self.__jobs.remove(job.id())
         self.real_size -= job.get_size()
-        verbose("@Service - Reclaimed %s MB of storage (%s)." %
-                ((job.get_size()/1000000), self.name))
+        logger.log(VERBOSE, "@Service - Reclaimed %s MB of storage (%s).",
+                (job.get_size()/1000000), self.name)
 
     def is_full(self):
         _delta = self.config['job_size']
@@ -148,9 +148,9 @@ class Service(dict):
            self.real_size < _quota * 1.3:
             return False
 
-        verbose("Quota: %s" % _quota)
-        verbose("Delta: %s" % _delta)
-        verbose("Size: %s" % self.current_size)
+        logger.log(VERBOSE, "Quota: %s", _quota)
+        logger.log(VERBOSE, "Delta: %s", _delta)
+        logger.log(VERBOSE, "Size: %s", self.current_size)
         return True
 
 

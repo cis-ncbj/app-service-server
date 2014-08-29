@@ -16,7 +16,7 @@ from sqlalchemy import orm, event, create_engine
 from sqlalchemy.orm import relationship, backref, sessionmaker
 from sqlalchemy import Column, Integer, String, DateTime, PickleType, ForeignKey
 
-from Config import conf, verbose, ExitCodes
+from Config import conf, VERBOSE, ExitCodes
 from DataStore import SchedulerStore, ServiceStore
 
 
@@ -175,7 +175,8 @@ def set_job_state_scheduler(target, value, oldvalue, initiator):
 
 @event.listens_for(JobState.state, 'set')
 def set_job_state_state(target, value, oldvalue, initiator):
-    verbose("@JobState - Dirty: state changed (%s => %s)" % (oldvalue, value))
+    logger.log(VERBOSE, "@JobState - Dirty: state changed (%s => %s)",
+            oldvalue, value)
     target.attr_dirty |= target.D_STATE
 
 
@@ -331,6 +332,7 @@ class Job(Base):
         :param job_state: Existing JobState instance to associate with the new
             Job.
         """
+        logger.log(VERBOSE, "@Job - Job initialization")
         if job_state is None:
             job_state = JobState(job_id)
         elif not isinstance(job_state, JobState):
@@ -493,9 +495,9 @@ class Job(Base):
         called.
         """
 
-        verbose("@Job - Finish job %s." % self.id())
+        logger.log(VERBOSE, "@Job - Finish job %s.", self.id())
         if self.status.exit_state is None:
-            self.die("@Job - Exit status is not defined for job %s." %
+            self.die("@Job - Exit status is not defined for job %s.",
                      self.id())
             return
 
@@ -530,16 +532,15 @@ class Job(Base):
             _name = os.path.join(conf.gate_path_output, self.id())
             if not os.path.exists(_name):
                 self.size = 0
-                verbose("@Job - Job output size calculated: %s" %
-                        self.size)
+                logger.log(VERBOSE, "@Job - Job output size calculated: 0")
                 return
 
             # Use /usr/bin/du as os.walk is very slow
             _opts = [u'/usr/bin/du', u'-sb', _name]
-            verbose("@Job - Running command: %s" % str(_opts))
+            logger.log(VERBOSE, "@Job - Running command: %s", _opts)
             _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
             _output = _proc.communicate()
-            verbose(_output)
+            logger.log(VERBOSE, _output)
             # Hopefully du returned meaningful result
             _size = _output[0].split()[0]
             # Check return code. If du was not killed by signal Popen will
@@ -547,18 +548,18 @@ class Job(Base):
             if _proc.returncode != 0:
                 raise OSError((
                     _proc.returncode,
-                    "/usr/bin/du returned non zero exit code.\n%s" %
+                    "/usr/bin/du returned non zero exit code.\n%s",
                     str(_output)
                 ))
         except:
             logger.error(
-                "@Job - Unable to calculate job output size %s." % self.id(),
+                "@Job - Unable to calculate job output size %s.", self.id(),
                 exc_info=True
             )
             return
 
         self.size = int(_size)
-        verbose("@Job - Job output size calculated: %s" % self.size)
+        logger.log(VERBOSE, "@Job - Job output size calculated: %s", self.size)
 
     def compact(self):
         """
@@ -615,7 +616,7 @@ class Job(Base):
                             (new_state, self.id()))
 
         self.status.state = new_state
-        verbose("@Job - State changed to %s(%s)." % (new_state, self.id()))
+        logger.log(VERBOSE, "@Job - State changed to %s(%s).", new_state, self.id())
 
     def __set_exit_state(self, message, state, exit_code):
         """
@@ -661,8 +662,8 @@ class StateManager(object):
     def __init__(self):
         _DB = 'sqlite:///jobs.db'
         #: Turn on DB logging for verbose mode
-        _verbose = False
-        #_verbose = True
+        #_verbose = False
+        _verbose = True
         #: DB engine
         self.engine = create_engine(_DB, echo=_verbose)
         # Enforce foreign keys in SQLite
@@ -698,12 +699,12 @@ class StateManager(object):
 
     def commit(self, session=None):
         """
-        Commit changes to the DB.
+        Commit changes to the DB. Invalidates SQLAlchemy ORM instances.
 
         :param session: if specified use this session instance instead of the
             default.
         """
-        verbose("@StateManager: Commit session to DB")
+        logger.log(VERBOSE, "@StateManager: Commit session to DB")
         if session is None:
             session = self.session
 
@@ -713,6 +714,26 @@ class StateManager(object):
             session.commit()
         except:
             logger.error("@StateManager - Commit failed.", exc_info=True)
+            session.rollback()
+
+    def flush(self, session=None):
+        """
+        Flush changes to the DB transaction. The data are not persisted (or
+        available for other transactions) until a call to commit.
+
+        :param session: if specified use this session instance instead of the
+            default.
+        """
+        logger.log(VERBOSE, "@StateManager: Flush session to DB")
+        if session is None:
+            session = self.session
+
+        # Issue rollback in case of problems.
+        # Otherwise SQLAlchemy is in inconsistent state and raises exceptions.
+        try:
+            session.flush()
+        except:
+            logger.error("@StateManager - Flush failed.", exc_info=True)
             session.rollback()
 
     def poll_gw(self, session=None):
@@ -757,7 +778,7 @@ class StateManager(object):
         """
         if session is None:
             session = self.session
-        verbose("@StateManager: Will attach job %s to the session." % job.id())
+        logger.log(VERBOSE, "@StateManager: Will attach job %s to the session.", job.id())
         session.add(job)
 
     def detach_job(self, job, session=None):
@@ -770,7 +791,7 @@ class StateManager(object):
         """
         if session is None:
             session = self.session
-        verbose("@StateManager: Will detach job %s from session." % job.id())
+        logger.log(VERBOSE, "@StateManager: Will detach job %s from session.", job.id())
         # Make sure no changes are pending
         self.commit(session)
         session.expunge(job)
@@ -1083,6 +1104,8 @@ class FileStateManager(StateManager):
                          _path, exc_info=True)
             return
 
+        logger.log(VERBOSE, u"@FileStateManager - New job requests: %s", len(_list))
+
         for _jid in _list:
             # Create new Job instance. It will be created in 'waiting' state
             _job = self.new_job(_jid)
@@ -1092,18 +1115,18 @@ class FileStateManager(StateManager):
         # Get list of waiting jobs (includes new requests and request not processed yet)
         _jobs = self.get_job_list("waiting")
 
-        verbose(u"@FileStateManager - Waiting job requests: %s" % len(_jobs))
+        logger.log(VERBOSE, u"@FileStateManager - Waiting job requests: %s", len(_jobs))
 
         return _jobs
 
     def commit(self, session=None):
-        verbose("@FileStateManager: Push status changes to AppGW.")
+        logger.log(VERBOSE, "@FileStateManager: Push status changes to AppGW.")
         if session is None:
             session = self.session
 
         for _entry in session.query(JobState).filter(JobState.attr_dirty > 0):
-            verbose("@FileStateManager: Found dirty (%s) JobState (%s)." %
-                    (_entry.attr_dirty, _entry.id))
+            logger.log(VERBOSE, "@FileStateManager: Found dirty (%s) JobState (%s).",
+                    _entry.attr_dirty, _entry.id)
             if _entry.attr_dirty & JobState.D_SERVICE:
                 self.__service_change(_entry)
             if _entry.attr_dirty & JobState.D_STATE:
@@ -1129,7 +1152,7 @@ class FileStateManager(StateManager):
         super(FileStateManager, self).commit(session)
 
     def poll_gw(self, session=None):
-        verbose(u"@FileStateManager: Poll AppGW for status changes.")
+        logger.log(VERBOSE, u"@FileStateManager: Poll AppGW for status changes.")
         if session is None:
             session = self.session
 
@@ -1141,7 +1164,7 @@ class FileStateManager(StateManager):
             logger.error(u"@FileStateManager - Unable to read directory: %s." %
                          _path, exc_info=True)
             return
-        verbose(u"@FileStateManager: Obtained job kill flags.")
+        logger.log(VERBOSE, u"@FileStateManager: Obtained job kill flags.")
 
         #@TODO should we use session??
         for _job in self.get_job_list(flag=JobState.FLAG_STOP):
@@ -1151,7 +1174,7 @@ class FileStateManager(StateManager):
         for _id in _list:
             _job = self.get_job(_id)
             _job.set_flag(JobState.FLAG_STOP)
-        verbose(u"@FileStateManager: Jobs flagged for kill.")
+        logger.log(VERBOSE, u"@FileStateManager: Jobs flagged for kill.")
 
         # Delete flags
         _path = conf.gate_path_flag_delete
@@ -1161,7 +1184,7 @@ class FileStateManager(StateManager):
             logger.error(u"@FileStateManager - Unable to read directory: %s." %
                          _path, exc_info=True)
             return
-        verbose(u"@FileStateManager: Obtained job delete flags.")
+        logger.log(VERBOSE, u"@FileStateManager: Obtained job delete flags.")
 
         for _job in self.get_job_list(flag=JobState.FLAG_DELETE):
             if _job.id() in _list:
@@ -1170,7 +1193,7 @@ class FileStateManager(StateManager):
         for _id in _list:
             _job = self.get_job(_id)
             _job.set_flag(JobState.FLAG_DELETE)
-        verbose(u"@FileStateManager: Jobs flagged for delete.")
+        logger.log(VERBOSE, u"@FileStateManager: Jobs flagged for delete.")
 
     def cleanup(self, status):
         """
@@ -1182,7 +1205,7 @@ class FileStateManager(StateManager):
         """
         _jid = status.id
 
-        verbose(u"@FileStateManager: Job cleanup (%s)" % _jid)
+        logger.log(VERBOSE, u"@FileStateManager: Job cleanup (%s)", _jid)
         # Remove job symlinks
         for _state, _path in conf.gate_path.items():
             _name = os.path.join(_path, _jid)
@@ -1216,7 +1239,8 @@ class FileStateManager(StateManager):
         _jid = status.id
         _new_state = status.state
 
-        verbose("@FileStateManager: State changed to: %s (%s)" % (_new_state, _jid))
+        logger.log(VERBOSE, "@FileStateManager: State changed to: %s (%s)",
+                _new_state, _jid)
         # Mark new state in the shared file system
         os.symlink(
             os.path.join(conf.gate_path_jobs, _jid),
@@ -1238,7 +1262,8 @@ class FileStateManager(StateManager):
         """
         _jid = status.id
 
-        verbose("@FileStateManager: Store exit msg: %s (%s)" % (status.exit_message, _jid))
+        logger.log(VERBOSE, "@FileStateManager: Store exit msg: %s (%s)",
+                status.exit_message, _jid)
         # The auxiliary info is stored in the opts directory as files with
         # names concatanated from data type name and job ID.
         _opt = os.path.join(conf.gate_path_opts, 'message_' + _jid)
@@ -1253,7 +1278,8 @@ class FileStateManager(StateManager):
         """
         _jid = status.id
 
-        verbose("@FileStateManager: Store exit state: %s (%s)" % (status.exit_state, _jid))
+        logger.log(VERBOSE, "@FileStateManager: Store exit state: %s (%s)",
+                status.exit_state, _jid)
         # The auxiliary info is stored in the opts directory as files with
         # names concatanated from data type name and job ID.
         _opt = os.path.join(conf.gate_path_opts, 'state_' + _jid)
@@ -1268,7 +1294,8 @@ class FileStateManager(StateManager):
         """
         _jid = status.id
 
-        verbose("@FileStateManager: Store exit code: %s (%s)" % (status.exit_code, _jid))
+        logger.log(VERBOSE, "@FileStateManager: Store exit code: %s (%s)",
+                status.exit_code, _jid)
         # The auxiliary info is stored in the opts directory as files with
         # names concatanated from data type name and job ID.
         _opt = os.path.join(conf.gate_path_opts, 'code_' + _jid)
@@ -1283,7 +1310,8 @@ class FileStateManager(StateManager):
         """
         _jid = status.id
 
-        verbose("@FileStateManager: Submit time change: %s (%s)" % (status.submit_time, _jid))
+        logger.log(VERBOSE, "@FileStateManager: Submit time change: %s (%s)",
+                status.submit_time, _jid)
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "submit_" + _jid)
@@ -1300,7 +1328,8 @@ class FileStateManager(StateManager):
         """
         _jid = status.id
 
-        verbose("@FileStateManager: Start time change: %s (%s)" % (status.start_time, _jid))
+        logger.log(VERBOSE, "@FileStateManager: Start time change: %s (%s)",
+                status.start_time, _jid)
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "start_" + _jid)
@@ -1317,7 +1346,8 @@ class FileStateManager(StateManager):
         """
         _jid = status.id
 
-        verbose("@FileStateManager: Stop time change: %s (%s)" % (status.stop_time, _jid))
+        logger.log(VERBOSE, "@FileStateManager: Stop time change: %s (%s)",
+                status.stop_time, _jid)
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "stop_" + _jid)
@@ -1334,7 +1364,8 @@ class FileStateManager(StateManager):
         """
         _jid = status.id
 
-        verbose("@FileStateManager: Wait time change: %s (%s)" % (status.wait_time, _jid))
+        logger.log(VERBOSE, "@FileStateManager: Wait time change: %s (%s)",
+                status.wait_time, _jid)
         # Timestamps are stored in the time directory as files with names
         # concatanated from event name and job ID.
         _fname = os.path.join(conf.gate_path_time, "wait_" + _jid)
@@ -1356,8 +1387,8 @@ class FileStateManager(StateManager):
         _flags_add = []    # Flags to set
         _flags_remove = [] # Flags to remove
 
-        verbose("@FileStateManager: Flags change: %s (%s)" %
-                (status.flags, _jid))
+        logger.log(VERBOSE, "@FileStateManager: Flags change: %s (%s)",
+                status.flags, _jid)
         # Consider only flags that were modified - have flags_dirty flag set
         # Flags that are currently set are added to _flags_add
         # Flags that are not set are added to _flags_remove

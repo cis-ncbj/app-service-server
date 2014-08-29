@@ -89,6 +89,8 @@ class DaemonRunner(object):
         if self.action in ['start', 'stop', 'restart']:
             logging.config.dictConfig(conf.log_config)
 
+        logger.log(VERBOSE, "AppServer Configuration:\n%s", conf)
+
         self.job_manager = None
         self.daemon_context = DaemonContext()
 
