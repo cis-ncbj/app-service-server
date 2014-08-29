@@ -979,6 +979,12 @@ class PbsScheduler(Scheduler):
             return False
         if len(_jobs) >= self.max_jobs:
             return False
+        _n=0
+        for _j in _jobs:
+            if _j.startswith(job.service):
+                _n+=1
+        if _n >= self.jm.services[job.service].config["max_jobs"]:
+            return False
 
         # Path names
         _work_dir = os.path.join(self.work_path, job.id)
