@@ -934,7 +934,7 @@ class PbsScheduler(Scheduler):
         # Check that maximum job limit is not exceeded
         # Use exclusive session to be thread safe
         _session = StateManager.new_session()
-        _job_count = StateManager.get_scheduler_count(self.name,
+        _job_count = StateManager.get_job_count(scheduler=self.name,
                 session=_session)
         _session.close()
         if _job_count < 0:
@@ -1213,7 +1213,7 @@ class SshScheduler(Scheduler):
 
         # Check that maximum job limit is not exceeded
         _session = StateManager.new_session()
-        _job_count = StateManager.get_scheduler_count(self.name,
+        _job_count = StateManager.get_job_count(scheduler=self.name,
                 session=_session)
         _session.close()
         if _job_count < 0:

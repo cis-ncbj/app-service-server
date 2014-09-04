@@ -12,8 +12,8 @@ from datetime import datetime
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.mutable import Mutable
-from sqlalchemy import orm, event, create_engine
-from sqlalchemy.orm import relationship, backref, sessionmaker
+from sqlalchemy import orm, event, create_engine, func
+from sqlalchemy.orm import relationship, backref, sessionmaker, deferred
 from sqlalchemy import Column, Integer, String, DateTime, PickleType, ForeignKey
 
 from Config import conf, VERBOSE, ExitCodes
@@ -95,26 +95,26 @@ class JobState(Base):
     #job_key = Column(Integer)
     #: Job unique identifier
     id = Column(String, unique=True)
-    #: Jobs' Service
-    service = Column(String)
-    #: Jobs' Scheduler
-    scheduler = Column(String)
     #: Current job state
     state = Column(String)
+    #: Jobs' Service
+    service = deferred(Column(String))
+    #: Jobs' Scheduler
+    scheduler = deferred(Column(String))
     #: Job exit message
-    exit_message = Column(String)
+    exit_message = deferred(Column(String))
     #: Job exit state
-    exit_state = Column(Integer)
+    exit_state = deferred(Column(Integer))
     #: Job exit code
-    exit_code = Column(Integer)
+    exit_code = deferred(Column(Integer))
     #: Time when job was submitted
     submit_time = Column(DateTime)
     #: Time when job execution started
-    start_time = Column(DateTime)
+    start_time = deferred(Column(DateTime))
     #: Time when job execution ended
-    stop_time = Column(DateTime)
+    stop_time = deferred(Column(DateTime))
     #: Time when wait flag was set
-    wait_time = Column(DateTime)
+    wait_time = deferred(Column(DateTime))
 
     # Flag values
     FLAG_DELETE, FLAG_STOP, FLAG_WAIT_QUOTA, FLAG_WAIT_INPUT, FLAG_OLD_API, \
@@ -303,7 +303,7 @@ class Job(Base):
     #: Primary key - autoincrement
     key = Column(Integer, primary_key=True)
     #: Job output size in bytes
-    size = Column(Integer)
+    size = deferred(Column(Integer))
     # Data stored in related tables. We use the relationship to make sure
     # related rows will be removed when job is removed
     # Specify explicitly foreign key for JobState. We do not want to use the
@@ -836,7 +836,8 @@ class StateManager(object):
         """
         raise NotImplementedError
 
-    def get_job_list(self, state="all", service=None, flag=None, session=None):
+    def get_job_list(self, state="all", service=None, scheduler=None,
+            flag=None, session=None):
         """
         Get a list of jobs that are in a selected state.
 
@@ -858,6 +859,11 @@ class StateManager(object):
             session = self.session
 
         # Validate input
+        if scheduler is not None and scheduler not in SchedulerStore.keys():
+            logger.error(
+                "@StateManager - unknown scheduler %s.", scheduler
+            )
+            return
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s", state)
             return
@@ -870,6 +876,9 @@ class StateManager(object):
 
         # Build query
         _q = session.query(Job).join(JobState) 
+        if scheduler is not None:
+            _q = _q.join(SchedulerQueue).\
+                 filter(SchedulerQueue.scheduler == scheduler)
         if state != 'all':
             _q = _q.filter(JobState.state == state)
         if service is not None:
@@ -881,8 +890,8 @@ class StateManager(object):
         # Execute query
         return _q.all()
 
-    def get_job_count(self, state="all", service=None, flag=None,
-                      session=None):
+    def get_job_count(self, state="all", service=None, scheduler=None,
+                      flag=None, session=None):
         """
         Get a count of jobs that are in a selected state.
 
@@ -905,6 +914,11 @@ class StateManager(object):
         _job_count = -1
 
         # Validate input
+        if scheduler is not None and scheduler not in SchedulerStore.keys():
+            logger.error(
+                "@StateManager - unknown scheduler %s.", scheduler
+            )
+            return _job_count
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s", state)
             return _job_count
@@ -917,6 +931,9 @@ class StateManager(object):
 
         # Build query
         _q = session.query(Job).join(JobState) 
+        if scheduler is not None:
+            _q = _q.join(SchedulerQueue).\
+                 filter(SchedulerQueue.scheduler == scheduler)
         if state != 'all':
             _q = _q.filter(JobState.state == state)
         if service is not None:
@@ -930,17 +947,11 @@ class StateManager(object):
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
 
-    def get_scheduler_list(self, scheduler, state="all", service=None,
-                           flag=None, session=None):
+    def get_active_job_count(self, service=None, scheduler=None, flag=None,
+                      session=None):
         """
-        Get a list of jobs that are in a scheduler queue.
+        Get a count of jobs that are active.
 
-        :param str scheduler: Specifies scheduler name for which Jobs will be
-            selected.
-        :param str state: Specifies state for which Jobs will be selected. To
-            select all jobs specify 'all' as the state. Valid states consist of
-            job states and flags: waiting, processing, queued, running,
-            closing, cleanup, done, failed, aborted, killed
         :param str service: if specified select only jobs that belong to
             selected service.
         :param int flag: if specified select only jobs with the flag (or set of
@@ -948,61 +959,7 @@ class StateManager(object):
         :param Session session: if specified use this session instance instead
             of the default.
 
-        :return: List of Job instances sorted by submit time.
-        :raises:
-        """
-        if session is None:
-            session = self.session
-
-        # Validate input
-        if scheduler not in SchedulerStore.keys():
-            logger.error(
-                "@StateManager - unknown scheduler %s.", scheduler
-            )
-            return
-        if state != 'all' and state not in conf.service_states:
-            logger.error("@StateManager - Unknown state: %s", state)
-            return
-        if service is not None and service not in ServiceStore.keys():
-            logger.error("@StateManager - Unknown service: %s", service)
-            return
-        if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
-            logger.error("@StateManager - Unknown flag: %s", flag)
-            return
-
-        # Build query - select only jobs that belong to specified scheduler
-        _q = session.query(Job).join(JobState).join(SchedulerQueue).\
-                 filter(SchedulerQueue.scheduler == scheduler)
-        if state != 'all':
-            _q = _q.filter(JobState.state == state)
-        if service is not None:
-            _q = _q.filter(JobState.service == service)
-        if flag is not None:
-            _q = _q.filter(JobState.flags.op('&')(flag) > 0)
-        # Order results by submit time
-        _q = _q.order_by(JobState.submit_time)
-        # Execute query
-        return _q.all()
-
-    def get_scheduler_count(self, scheduler, state="all", service=None,
-                            flag=None, session=None):
-        """
-        Get a count jobs that are in a scheduler queue.
-
-        :param scheduler: Specifies scheduler name for which Jobs will be
-            selected.
-        :param state: Specifies state for which Jobs will be selected. To
-            select all jobs specify 'all' as the state. Valid states consist of
-            job states and flags: waiting, processing, queued, running,
-            closing, cleanup, done, failed, aborted, killed
-        :param service: if specified select only jobs that belong to selected
-            service.
-        :param flag: if specified select only jobs with the flag (or set of
-            flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
-        :param session: if specified use this session instance instead of the
-            default.
-
-        :return: Number of jobs in the scheduler queue, or -1 in case of error.
+        :return: Number of jobs in the selected state, or -1 in case of error.
         """
         if session is None:
             session = self.session
@@ -1010,13 +967,10 @@ class StateManager(object):
         _job_count = -1
 
         # Validate input
-        if scheduler not in SchedulerStore.keys():
+        if scheduler is not None and scheduler not in SchedulerStore.keys():
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
-            return _job_count
-        if state != 'all' and state not in conf.service_states:
-            logger.error("@StateManager - Unknown state: %s", state)
             return _job_count
         if service is not None and service not in ServiceStore.keys():
             logger.error("@StateManager - Unknown service: %s", service)
@@ -1025,18 +979,115 @@ class StateManager(object):
             logger.error("@StateManager - Unknown flag: %s", flag)
             return _job_count
 
-        # Build query - select only jobs that belong to specified scheduler
-        _q = session.query(Job).join(JobState).join(SchedulerQueue).\
+        _counters = self.get_job_state_counters(service=service,
+                scheduler=scheduler, flag=flag, session=session)
+        _states = { _key : 0 for _key in conf.service_states }
+        for (_count, _key) in _counters:
+            _states[_key] = _count
+
+        _job_count = 0
+        for _key in ("queued", "processing", "running", "closing", "cleanup"):
+            _job_count += _states[_key]
+
+        return _job_count
+
+    def get_job_state_counters(self, service=None, scheduler=None, flag=None, session=None):
+        """
+        Get a count of jobs that are in a selected state.
+
+        :param str service: if specified select only jobs that belong to
+            selected service.
+        :param int flag: if specified select only jobs with the flag (or set of
+            flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
+        :param Session session: if specified use this session instance instead
+            of the default.
+
+        :return: Number of jobs in the selected state, or -1 in case of error.
+        """
+        if session is None:
+            session = self.session
+
+        _job_count = []
+
+        # Validate input
+        if scheduler is not None and scheduler not in SchedulerStore.keys():
+            logger.error(
+                "@StateManager - unknown scheduler %s.", scheduler
+            )
+            return _job_count
+        if service is not None and service not in ServiceStore.keys():
+            logger.error("@StateManager - Unknown service: %s", service)
+            return _job_count
+        if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
+            logger.error("@StateManager - Unknown flag: %s", flag)
+            return _job_count
+
+        # Build query
+        if scheduler is not None:
+            _q = session.query(func.count(Job), JobState.state).join(JobState)
+            _q = _q.join(SchedulerQueue).\
                  filter(SchedulerQueue.scheduler == scheduler)
-        if state != 'all':
-            _q = _q.filter(JobState.state == state)
+        else:
+            _q = session.query(func.count(JobState.state), JobState.state)
         if service is not None:
             _q = _q.filter(JobState.service == service)
         if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
+        _q = _q.group_by(JobState.state)
         # Execute query
         try:
-            return _q.count()
+            return _q.all()
+        except:
+            logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
+            return _job_count
+
+    def get_active_service_counters(self, scheduler=None, flag=None, session=None):
+        """
+        Get a count of jobs that are in a selected state.
+
+        :param str service: if specified select only jobs that belong to
+            selected service.
+        :param int flag: if specified select only jobs with the flag (or set of
+            flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
+        :param Session session: if specified use this session instance instead
+            of the default.
+
+        :return: Number of jobs in the selected state, or -1 in case of error.
+        """
+        if session is None:
+            session = self.session
+
+        _job_count = []
+
+        # Validate input
+        if scheduler is not None and scheduler not in SchedulerStore.keys():
+            logger.error(
+                "@StateManager - unknown scheduler %s.", scheduler
+            )
+            return _job_count
+        if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
+            logger.error("@StateManager - Unknown flag: %s", flag)
+            return _job_count
+
+        # Build query
+        if scheduler is not None:
+            _q = session.query(func.count(JobState.service), JobState.service, Job).join(Job)
+            _q = _q.join(SchedulerQueue).\
+                 filter(SchedulerQueue.scheduler == scheduler)
+        else:
+            _q = session.query(func.count(JobState.service), JobState.service)
+        if flag is not None:
+            _q = _q.filter(JobState.flags.op('&')(flag) > 0)
+        _q = _q.filter(
+                (JobState.state == 'queued') |
+                (JobState.state == 'processing') |
+                (JobState.state == 'running') |
+                (JobState.state == 'closing') |
+                (JobState.state == 'cleanup'))
+        _q = _q.group_by(JobState.service)
+        # Execute query
+        try:
+            return _q.all()
         except:
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
@@ -1096,6 +1147,8 @@ class FileStateManager(StateManager):
         return _job
 
     def get_new_job_list(self):
+        logger.log(VERBOSE, u"@FileStateManager - Query job requests")
+
         _path = conf.gate_path_new
         try:
             _list = os.listdir(_path)

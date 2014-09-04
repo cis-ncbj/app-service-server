@@ -100,7 +100,7 @@ class Config(dict):
             'formatters': {
                 'verbose': {
                     'format':
-                    '== %(levelname)7s %(asctime)s [%(threadName)s:%(filename)s:%(lineno)s - %(funcName)s()] :\n%(message)s',
+                    '%(levelname)7s %(asctime)s : %(message)s',
                     #'datefmt': '%m-%d %H:%M:%S',
                 },
                 'debug': {

@@ -85,37 +85,36 @@ class JobManager(object):
         # Max wait timeout for job submission (e.g. for input upload)
         _dt_final = timedelta(hours=conf.service_max_lifetime)
 
+        logger.log(VERBOSE, '@JManager - Run query.')
         # Count current active jobs
-        _queue_count = StateManager.get_job_count("queued")
-        _processing_count = StateManager.get_job_count("processing")
-        _run_count = StateManager.get_job_count("running")
-        _close_count = StateManager.get_job_count("closing")
-        _clean_count = StateManager.get_job_count("cleanup")
+        _active_count = StateManager.get_active_job_count()
 
         # Available job slots
-        _new_slots = conf.config_max_jobs - _queue_count - _processing_count -\
-            _run_count - _close_count - _clean_count
+        _new_slots = conf.config_max_jobs - _active_count
 
         logger.log(VERBOSE, '@JManager - Free job slots: %s.', _new_slots)
 
         # Available job slots per service
+        #_service_slots = {}
+        #for (_service_name, _service) in ServiceStore.items():
+            # Count current active jobs
+            #_service_active_count = StateManager.get_active_job_count(
+            #        service=_service_name)
+            # Available job slots
+            #_service_slots[_service_name] = _service.config['max_jobs'] - \
+            #        _service_active_count
+
+        # Available job slots per service
+        _counters = StateManager.get_active_service_counters()
+        _service_jobs = { _key : 0 for _key in ServiceStore.keys() }
+        for (_count, _key) in _counters:
+            _service_jobs[_key] = _count
+
         _service_slots = {}
         for (_service_name, _service) in ServiceStore.items():
-            # Count current active jobs
-            _service_queue_count = StateManager.get_job_count("queued",
-                    service=_service_name)
-            _service_processing_count = StateManager.get_job_count("processing",
-                    service=_service_name)
-            _service_run_count = StateManager.get_job_count("running",
-                    service=_service_name)
-            _service_close_count = StateManager.get_job_count("closing",
-                    service=_service_name)
-            _service_clean_count = StateManager.get_job_count("cleanup",
-                    service=_service_name)
             # Available job slots
             _service_slots[_service_name] = _service.config['max_jobs'] - \
-                    _service_queue_count - _service_run_count - \
-                    _service_close_count - _service_clean_count
+                    _service_jobs[_service_name]
 
         logger.log(VERBOSE, '@JManager - Free service slots: %s.', _service_slots)
 
@@ -278,7 +277,7 @@ class JobManager(object):
 
         # Loop over supported schedulers
         for _sname, _scheduler in SchedulerStore.items():
-            _jobs = StateManager.get_scheduler_list(_sname)
+            _jobs = StateManager.get_job_list(scheduler=_sname)
             _jobs_active = []
             for _job in _jobs:
                 # Scheduler can change state for only running and waiting jobs.
@@ -494,20 +493,16 @@ class JobManager(object):
         Log the current queue state.
         """
 
-        _waiting = StateManager.get_job_count('waiting')
-        _processing = StateManager.get_job_count('processing')
-        _queued = StateManager.get_job_count('queued')
-        _running = StateManager.get_job_count('running')
-        _closing = StateManager.get_job_count('closing')
-        _cleanup = StateManager.get_job_count('cleanup')
-        _done = StateManager.get_job_count('done')
-        _failed = StateManager.get_job_count('failed')
-        _aborted = StateManager.get_job_count('aborted')
-        _killed = StateManager.get_job_count('killed')
+        _results = StateManager.get_job_state_counters()
+        _states = { _key : 0 for _key in conf.service_states }
+        for (_count, _key) in _results:
+            _states[_key] = _count
 
         logger.debug("Jobs - w:%s, p:%s, q:%s, r:%s, s:%s, c:%s, d:%s, f:%s, "
-                "a:%s, k:%s.", _waiting, _processing, _queued, _running,
-                    _closing, _cleanup, _done, _failed, _aborted, _killed)
+                "a:%s, k:%s.", _states['waiting'], _states['processing'],
+                _states['queued'], _states['running'], _states['closing'],
+                _states['cleanup'], _states['done'], _states['failed'],
+                _states['aborted'], _states['killed'])
 
     def check_finished_threads(self):
         """Check for cleanup threads that finished execution.
