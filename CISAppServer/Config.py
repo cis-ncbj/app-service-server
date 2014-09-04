@@ -100,7 +100,7 @@ class Config(dict):
             'formatters': {
                 'verbose': {
                     'format':
-                    '%(levelname)7s %(asctime)s : %(message)s',
+                    '== %(levelname)7s %(asctime)s [%(threadName)s:%(filename)s:%(lineno)s - %(funcName)s()] :\n%(message)s',
                     #'datefmt': '%m-%d %H:%M:%S',
                 },
                 'debug': {
@@ -271,7 +271,7 @@ class Config(dict):
 
         if conf_name is not None:
             # Load configuration from option file
-            logger.debug("@Config - Loading global configuration: %s" %
+            logger.debug("@Config - Loading global configuration: %s",
                          conf_name)
             self.config_file = conf_name
             with open(self.config_file) as _conf_file:

@@ -172,14 +172,14 @@ class DaemonRunner(object):
             format='%(levelname)-8s %(message)s',
         )
 
-        info("CISAppS %s" % version)
-        info("CLI Logging level: %s" % _log_level_name)
-        info("Configuration file: %s" % _args.config)
+        info("CISAppS %s", version)
+        info("CLI Logging level: %s", _log_level_name)
+        info("Configuration file: %s", _args.config)
 
         # Load configuration from option file
         debug('@Daemon - Loading global configuration ...')
         conf.load(_args.config)
-        info("Logging level: %s" % conf.log_level)
+        info("Logging level: %s", conf.log_level)
 
         self.action = unicode(_args.action)
         if self.action not in self.action_funcs:
@@ -205,8 +205,9 @@ class DaemonRunner(object):
         # Catch exceptions and log them otherwise we will not see what happened
         try:
             pid = os.getpid()
+            # TODO Describe why logger.info is needed instead of info ????
             # info("CISAppServer started with pid %d" % pid)
-            logger.info("CISAppServer started with pid %d" % pid)
+            logger.info("CISAppServer started with pid %d", pid)
             # Disable console logging
             _h = logging.root.handlers[0]
             logging.root.removeHandler(_h)
@@ -349,7 +350,7 @@ class DaemonRunner(object):
 
     def reload_config(self, signum, frame):
         logger.info("Received reload command")
-        logger.debug("PWD: %s" % os.getcwd())
+        logger.debug("PWD: %s", os.getcwd())
         conf.load(conf.config_file)
         self.job_manager.clear()
         self.job_manager.init()
@@ -365,7 +366,7 @@ class DaemonRunner(object):
 
     def run(self):
         """ Perform the requested action. """
-        logger.info("Executing %s" % self.action)
+        logger.info("Executing %s", self.action)
         func = self._get_action_func()
         func(self)
 
@@ -373,10 +374,10 @@ class DaemonRunner(object):
 def make_pidlockfile(path, acquire_timeout):
     """ Make a PIDLockFile instance with the given filesystem path. """
     if not isinstance(path, basestring):
-        err = ValueError(u"Not a filesystem path: %r" % path)
+        err = ValueError(u"Not a filesystem path: %r", path)
         raise err
     if not os.path.isabs(path):
-        err = ValueError(u"Not an absolute path: %r" % path)
+        err = ValueError(u"Not an absolute path: %r", path)
         raise err
     lockfile = pidfile.TimeoutPIDLockFile(path, acquire_timeout)
 

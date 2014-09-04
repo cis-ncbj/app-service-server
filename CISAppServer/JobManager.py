@@ -167,7 +167,7 @@ class JobManager(object):
                 # flags
                 pass
 
-            logger.debug('@JManager - Detected new job %s.' % _job.id())
+            logger.debug('@JManager - Detected new job %s.', _job.id())
 
             # Validate input
             try:
@@ -259,11 +259,11 @@ class JobManager(object):
                 _thread.start()
                 self.__thread_list.append(_thread)
                 logger.debug("@JManager - Submit thread started "
-                             "for job %s" % _job.id())
+                             "for job %s", _job.id())
                 _service_slots[_service_name] -= 1  # Mark slot as used
             except:
                 logger.error("@JManager - Unable to start submit thread "
-                             "for job %s" % _job.id(), exc_info=True)
+                             "for job %s", _job.id(), exc_info=True)
 
             _i += 1  # Mark slot as used
 
@@ -306,7 +306,7 @@ class JobManager(object):
         logger.log(VERBOSE, '@JManager - Check for jobs marked for cleanup.')
 
         for _job in StateManager.get_job_list("closing"):
-            logger.debug('@JManager - Detected cleanup job %s.' % _job.id())
+            logger.debug('@JManager - Detected cleanup job %s.', _job.id())
 
             # Check for valid input data
             if not _job.get_exit_state():
@@ -330,7 +330,7 @@ class JobManager(object):
                     _thread.start()
                     self.__thread_list.append(_thread)
                     logger.debug("@JManager - Abort cleanup thread started "
-                                 "for job %s" % _job.id())
+                                 "for job %s", _job.id())
                 else:
                     _thread = threading.Thread(
                         target=_scheduler.finalise, args=(_job.id(),),
@@ -338,10 +338,10 @@ class JobManager(object):
                     _thread.start()
                     self.__thread_list.append(_thread)
                     logger.debug("@JManager - Finalise cleanup thread started "
-                                 "for job %s" % _job.id())
+                                 "for job %s", _job.id())
             except:
                 logger.error("@JManager - Unable to start cleanup thread "
-                             "for job %s" % _job.id(), exc_info=True)
+                             "for job %s", _job.id(), exc_info=True)
 
     def check_job_kill_requests(self):
         """
@@ -376,13 +376,13 @@ class JobManager(object):
                 _job.finish('User request', 'killed', ExitCodes.UserKill)
             else:
                 logger.warning("@JManager - Cannot kill job %s. "
-                               "It is already finished." % _job.id())
+                               "It is already finished.", _job.id())
 
             # Remove the kill mark
             try:
                 _job.set_flag(JobState.FLAG_STOP, remove=True)
             except:
-                logger.error("Cannot remove kill flag for job %s." % _job.id(),
+                logger.error("Cannot remove kill flag for job %s.", _job.id(),
                              exc_info=True)
 
     def check_deleted_jobs(self):
@@ -427,14 +427,14 @@ class JobManager(object):
                     # Update service quota status
                     ServiceStore[_job.status.service].remove_job(_job)
             except:
-                logger.error("Cannot remove job output %s." % _jid,
+                logger.error("Cannot remove job output %s.", _jid,
                              exc_info=True)
 
             # Delete the job
             try:
                 StateManager.delete_job(_job)
             except:
-                logger.error("Cannot remove job %s." % _jid, exc_info=True)
+                logger.error("Cannot remove job %s.", _jid, exc_info=True)
 
             logger.info('@JManager - Job %s removed with all data.' %
                         _jid)
@@ -506,8 +506,8 @@ class JobManager(object):
         _killed = StateManager.get_job_count('killed')
 
         logger.debug("Jobs - w:%s, p:%s, q:%s, r:%s, s:%s, c:%s, d:%s, f:%s, "
-                "a:%s, k:%s." % (_waiting, _processing, _queued, _running,
-                    _closing, _cleanup, _done, _failed, _aborted, _killed))
+                "a:%s, k:%s.", _waiting, _processing, _queued, _running,
+                    _closing, _cleanup, _done, _failed, _aborted, _killed)
 
     def check_finished_threads(self):
         """Check for cleanup threads that finished execution.
@@ -669,7 +669,7 @@ class JobManager(object):
             logger.error("@JobManager - Unable to finalize job submission.",
                          exc_info=True)
             return
-        logger.debug("@JobManager - job submitted: %s" % jid)
+        logger.debug("@JobManager - job submitted: %s", jid)
 
     def shutdown(self):
         """

@@ -442,7 +442,7 @@ class Job(Base):
         # Mark as killed makes sense only for unfinished jobs
         if self.get_state() not in ['waiting', 'queued', 'running']:
             logger.warning("@Job - Job %s already finished, cannot mark as "
-                           "killed" % self.id())
+                           "killed", self.id())
             return
 
         self.__set_exit_state(message, 'killed', exit_code)
@@ -505,7 +505,7 @@ class Job(Base):
         try:
             self.__set_state(self.status.exit_state)
         except:
-            logger.error("@Job - Cannot set job state %s." % self.id(),
+            logger.error("@Job - Cannot set job state %s.", self.id(),
                          exc_info=True)
 
         # Store stop time
@@ -514,7 +514,7 @@ class Job(Base):
         except:
             logger.error("@Job - Cannot store job stop time.", exc_info=True)
 
-        logger.info("Job %s finished: %s" % (self.id(), self.status.exit_state))
+        logger.info("Job %s finished: %s", self.id(), self.status.exit_state)
 
     def calculate_size(self):
         """
@@ -662,8 +662,8 @@ class StateManager(object):
     def __init__(self):
         _DB = 'sqlite:///jobs.db'
         #: Turn on DB logging for verbose mode
-        #_verbose = False
-        _verbose = True
+        _verbose = False
+        #_verbose = True
         #: DB engine
         self.engine = create_engine(_DB, echo=_verbose)
         # Enforce foreign keys in SQLite
@@ -859,13 +859,13 @@ class StateManager(object):
 
         # Validate input
         if state != 'all' and state not in conf.service_states:
-            logger.error("@StateManager - Unknown state: %s" % state)
+            logger.error("@StateManager - Unknown state: %s", state)
             return
         if service is not None and service not in ServiceStore.keys():
-            logger.error("@StateManager - Unknown service: %s" % service)
+            logger.error("@StateManager - Unknown service: %s", service)
             return
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
-            logger.error("@StateManager - Unknown flag: %s" % flag)
+            logger.error("@StateManager - Unknown flag: %s", flag)
             return
 
         # Build query
@@ -906,13 +906,13 @@ class StateManager(object):
 
         # Validate input
         if state != 'all' and state not in conf.service_states:
-            logger.error("@StateManager - Unknown state: %s" % state)
+            logger.error("@StateManager - Unknown state: %s", state)
             return _job_count
         if service is not None and service not in ServiceStore.keys():
-            logger.error("@StateManager - Unknown service: %s" % service)
+            logger.error("@StateManager - Unknown service: %s", service)
             return _job_count
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
-            logger.error("@StateManager - Unknown flag: %s" % flag)
+            logger.error("@StateManager - Unknown flag: %s", flag)
             return _job_count
 
         # Build query
@@ -957,17 +957,17 @@ class StateManager(object):
         # Validate input
         if scheduler not in SchedulerStore.keys():
             logger.error(
-                "@StateManager - unknown scheduler %s." % scheduler
+                "@StateManager - unknown scheduler %s.", scheduler
             )
             return
         if state != 'all' and state not in conf.service_states:
-            logger.error("@StateManager - Unknown state: %s" % state)
+            logger.error("@StateManager - Unknown state: %s", state)
             return
         if service is not None and service not in ServiceStore.keys():
-            logger.error("@StateManager - Unknown service: %s" % service)
+            logger.error("@StateManager - Unknown service: %s", service)
             return
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
-            logger.error("@StateManager - Unknown flag: %s" % flag)
+            logger.error("@StateManager - Unknown flag: %s", flag)
             return
 
         # Build query - select only jobs that belong to specified scheduler
@@ -1012,17 +1012,17 @@ class StateManager(object):
         # Validate input
         if scheduler not in SchedulerStore.keys():
             logger.error(
-                "@StateManager - unknown scheduler %s." % scheduler
+                "@StateManager - unknown scheduler %s.", scheduler
             )
             return _job_count
         if state != 'all' and state not in conf.service_states:
-            logger.error("@StateManager - Unknown state: %s" % state)
+            logger.error("@StateManager - Unknown state: %s", state)
             return _job_count
         if service is not None and service not in ServiceStore.keys():
-            logger.error("@StateManager - Unknown service: %s" % service)
+            logger.error("@StateManager - Unknown service: %s", service)
             return _job_count
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
-            logger.error("@StateManager - Unknown flag: %s" % flag)
+            logger.error("@StateManager - Unknown flag: %s", flag)
             return _job_count
 
         # Build query - select only jobs that belong to specified scheduler

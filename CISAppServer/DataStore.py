@@ -73,7 +73,7 @@ class Service(dict):
         :param job: :py:class:`Job` instance
         """
         if job.id() in self.__job_proxies:
-            logger.error("@Service - Job proxy already exists: %s" % job.id())
+            logger.error("@Service - Job proxy already exists: %s", job.id())
             return
 
         self.current_size += self.config['job_size']
@@ -129,7 +129,7 @@ class Service(dict):
         :param job: :py:class:`Job` instance
         """
         if job.id() not in self.__jobs:
-            logger.error("@Service - Job does not exist: %s" % job.id())
+            logger.error("@Service - Job does not exist: %s", job.id())
             return
         if job.id() in self.__job_proxies:
             self.__job_proxies.remove(job.id())

@@ -103,7 +103,7 @@ class Validator(object):
                 _plugin_dir = os.path.join(_plugin_dir, 'plugins')
                 _plugins.append(_plugin_dir)
 
-            logger.info("Initialized service: %s" % _service)
+            logger.info("Initialized service: %s", _service)
         if logger.getEffectiveLevel() <= VERBOSE:
             logger.log(VERBOSE, json.dumps(ServiceStore))
 
@@ -135,7 +135,7 @@ class Validator(object):
         _name = os.path.join(conf.gate_path_jobs, job.id())
         with open(_name) as _f:
             _data = json.load(_f)
-        logger.debug(u'@Job - Loaded data file %s.' % job.id())
+        logger.debug(u'@Job - Loaded data file %s.', job.id())
         logger.log(VERBOSE, _data)
 
         # Check if data contains service attribute and that such service was
@@ -325,13 +325,13 @@ class Validator(object):
         elif service.variables[key]['type'] == 'string_array':
             if not isinstance(value, list) and isinstance(value, tuple):
                 logger.error(
-                    "@Validator - Value is not a proper array:  %s" % key
+                    "@Validator - Value is not a proper array:  %s", key
                 )
                 return False
             try:
                 if len(value) > service.variables[key]['values'][0]:
                     logger.error(
-                        "@Validator - Array  exceeds allowed length:  %s" % key
+                        "@Validator - Array  exceeds allowed length:  %s", key
                     )
                     return False
             except IndexError:
@@ -348,13 +348,13 @@ class Validator(object):
         elif service.variables[key]['type'] == 'int_array':
             if not isinstance(value, list) and isinstance(value, tuple):
                 logger.error(
-                    "@Validator - Value is not a proper array:  %s" % key
+                    "@Validator - Value is not a proper array:  %s", key
                 )
                 return False
             try:
                 if len(value) > service.variables[key]['values'][0]:
                     logger.error(
-                        "@Validator - Array  exceeds allowed length:  %s" % key
+                        "@Validator - Array  exceeds allowed length:  %s", key
                     )
                     return False
             except IndexError:
@@ -380,13 +380,13 @@ class Validator(object):
         elif service.variables[key]['type'] == 'float_array':
             if not isinstance(value, list) and isinstance(value, tuple):
                 logger.error(
-                    "@Validator - Value is not a proper array:  %s" % key
+                    "@Validator - Value is not a proper array:  %s", key
                 )
                 return False
             try:
                 if len(value) > service.variables[key]['values'][0]:
                     logger.error(
-                        "@Validator - Array  exceeds allowed length:  %s" % key
+                        "@Validator - Array  exceeds allowed length:  %s", key
                     )
                     return False
             except IndexError:
@@ -584,7 +584,7 @@ class Scheduler(object):
 
         _clean = True
 
-        logger.debug("@Scheduler - Retrive job output: %s" % jid)
+        logger.debug("@Scheduler - Retrive job output: %s", jid)
         _work_dir = os.path.join(self.work_path, jid)
 
         try:
@@ -602,7 +602,7 @@ class Scheduler(object):
                               ignore_errors=True)
         except:
             logger.error("@Scheduler - Unable to clean up job output "
-                         "directory %s" % _work_dir, exc_info=True)
+                         "directory %s", _work_dir, exc_info=True)
 
         if os.path.isdir(_work_dir):
             try:
@@ -668,7 +668,7 @@ class Scheduler(object):
         except:
             logger.error("@Scheduler - Unable to finalize cleanup.",
                          exc_info=True)
-        logger.debug("@Scheduler - job finalised: %s" % jid)
+        logger.debug("@Scheduler - job finalised: %s", jid)
 
     def abort(self, jid):
         """
@@ -679,7 +679,7 @@ class Scheduler(object):
         :param job: :py:class:`Job` instance
         """
 
-        logger.debug("@Scheduler - Cleanup job: %s" % jid)
+        logger.debug("@Scheduler - Cleanup job: %s", jid)
 
         _work_dir = os.path.join(self.work_path, jid)
         _out_dir = os.path.join(conf.gate_path_output, jid)
@@ -697,13 +697,13 @@ class Scheduler(object):
         if os.path.isdir(_out_dir):
             _clean = False
             logger.error("@Scheduler - Unable to remove job output directory: "
-                         "%s" % jid, exc_info=True)
+                         "%s", jid, exc_info=True)
         if os.path.isdir(_work_dir):
             _clean = False
             logger.error("@Scheduler - Unable to remove job working "
-                         "directory: %s" % jid, exc_info=True)
+                         "directory: %s", jid, exc_info=True)
         if _clean:
-            logger.info("Job %s cleaned directories." % jid)
+            logger.info("Job %s cleaned directories.", jid)
 
         try:
             _session = StateManager.new_session()
@@ -722,7 +722,7 @@ class Scheduler(object):
             logger.error("@Scheduler - Unable to remove job SchedulerQueue.",
                          exc_info=True)
 
-        logger.debug("@Scheduler - finalize cleanup: %s" % jid)
+        logger.debug("@Scheduler - finalize cleanup: %s", jid)
         try:
             # Update service quota
             ServiceStore[_job.status.service].update_job(_job)
@@ -734,7 +734,7 @@ class Scheduler(object):
         except:
             logger.error("@Scheduler - Unable to finalize cleanup.",
                          exc_info=True)
-        logger.debug("@Scheduler - job abort finished: %s" % jid)
+        logger.debug("@Scheduler - job abort finished: %s", jid)
 
     def generate_scripts(self, job):
         """
@@ -780,7 +780,7 @@ class Scheduler(object):
         for _path, _dirs, _files in os.walk(_script_dir):
             # Relative paths for subdirectories
             _sub_dir = re.sub("^%s" % _script_dir, '', _path)
-            logger.debug("@Scheduler - Sub dir: %s" % _sub_dir)
+            logger.debug("@Scheduler - Sub dir: %s", _sub_dir)
             if _sub_dir:
                 # Remove starting /
                 _sub_dir = _sub_dir[1:]
@@ -885,7 +885,7 @@ class Scheduler(object):
                     shutil.copytree(_input_dir, _output_dir)
                     logger.debug(
                         "@Scheduler - Job %s output chained as input for "
-                        "Job %s" % (_id, job.id()))
+                        "Job %s", _id, job.id())
                 except:
                     job.die(
                         '@Scheduler - Cannot chain job %s output.' % _id,
@@ -1014,7 +1014,7 @@ class PbsScheduler(Scheduler):
         # Reduce memory footprint
         job.compact()
 
-        logger.info("Job successfully submitted: %s" % job.id())
+        logger.info("Job successfully submitted: %s", job.id())
         return True
 
     def update(self, jobs):
@@ -1162,7 +1162,7 @@ class PbsScheduler(Scheduler):
         # @TODO handle temporary communication timeouts with pbs server
         if _proc.returncode == 170: # Job in wrong state (e.g. exiting)
             logger.debug("@PBS - Wait with job kill: /usr/bin/qdel "
-                         "returned 170 exit code (%s)" % _output)
+                         "returned 170 exit code (%s)", _output)
             raise CisError("PBS qdel wrong job state")
         if _proc.returncode != 0:
             raise OSError((
@@ -1261,7 +1261,7 @@ class SshScheduler(Scheduler):
         # Reduce memory footprint
         job.compact()
 
-        logger.info("Job successfully submitted: %s" % job.id())
+        logger.info("Job successfully submitted: %s", job.id())
         return True
 
     def update(self, jobs):
