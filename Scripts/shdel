@@ -55,8 +55,8 @@ do
     # If no *.id files are found the ID is equal to PATTERN
     if [ "$ID" == "$PATTERN" ]
     then
-        echo "Job $PID not found."
-        exit 1
+        echo "No job info found."
+        exit 2
     fi
 
     # Get the process pid and check that it is present in system proc table
@@ -74,5 +74,5 @@ do
     fi
 done
 
-echo "Job $PID not found."
+echo "Job $KILL_PID not found."
 exit 1

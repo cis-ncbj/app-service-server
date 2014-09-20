@@ -32,9 +32,6 @@ import time
 
 from daemon import pidfile, DaemonContext
 
-from logging import \
-    debug, info
-
 from .JobManager import JobManager, version
 from .Config import conf, VERBOSE
 
@@ -76,6 +73,7 @@ class DaemonRunner(object):
     * 'reload': Reread the configuration file.
     * 'pause' : Stop the job queue
     * 'run' : Restart the job queue
+    * 'status' : Check status of the server
 
     """
 
@@ -112,6 +110,7 @@ class DaemonRunner(object):
         # Set signal handlers - they will react to action requests by user
         self.daemon_context.signal_map = {
             signal.SIGTERM: self.cleanup,
+            signal.SIGALRM: self.stop,
             signal.SIGHUP: self.reload_config,
             signal.SIGUSR1: self.pause,
             signal.SIGUSR2: self.unpause,
@@ -142,7 +141,7 @@ class DaemonRunner(object):
             'action', action='store',
             choices=[
                 'start', 'stop', 'terminate', 'restart', 'reload', 'pause',
-                'run'
+                'run', 'status'
             ],
             help='ACTION to be performed:\n'
             'start - start new daemon instance\n'
@@ -152,6 +151,7 @@ class DaemonRunner(object):
             'reload - reread configuration file\n'
             'pause - stop accepting new jobs\n'
             'run - restart accepting new jobs\n'
+            'status - print server status\n'
         )
         _args = _parser.parse_args()
 
@@ -172,14 +172,14 @@ class DaemonRunner(object):
             format='%(levelname)-8s %(message)s',
         )
 
-        info("CISAppS %s", version)
-        info("CLI Logging level: %s", _log_level_name)
-        info("Configuration file: %s", _args.config)
+        logger.info("CISAppS %s", version)
+        logger.info("CLI Logging level: %s", _log_level_name)
+        logger.info("Configuration file: %s", _args.config)
 
         # Load configuration from option file
-        debug('@Daemon - Loading global configuration ...')
+        logger.debug('@Daemon - Loading global configuration ...')
         conf.load(_args.config)
-        info("Logging level: %s", conf.log_level)
+        logger.info("Logging level: %s", conf.log_level)
 
         self.action = unicode(_args.action)
         if self.action not in self.action_funcs:
@@ -198,15 +198,12 @@ class DaemonRunner(object):
         try:
             self.daemon_context.open()
         except lockfile.AlreadyLocked:
-            # TODO output somehow to the console?
             raise DaemonRunnerStartFailureError(
                 u"PID file %r already locked" % self.pidfile.path)
 
         # Catch exceptions and log them otherwise we will not see what happened
         try:
             pid = os.getpid()
-            # TODO Describe why logger.info is needed instead of info ????
-            # info("CISAppServer started with pid %d" % pid)
             logger.info("CISAppServer started with pid %d", pid)
             # Disable console logging
             _h = logging.root.handlers[0]
@@ -231,7 +228,7 @@ class DaemonRunner(object):
         Terminate the daemon process specified in the current PID file.
         Daemon will not touch active jobs.
         """
-        self._signal_daemon_process(signal.SIGKILL)
+        self._signal_daemon_process(signal.SIGALRM)
 
     def _signal_daemon_process(self, user_signal):
         """
@@ -317,6 +314,19 @@ class DaemonRunner(object):
         else:
             self._signal_daemon_process(signal.SIGUSR2)
 
+    def _status(self):
+        if not self.pidfile.is_locked():
+            logger.info("AppServer is stopped.")
+            return
+
+        if is_pidfile_stale(self.pidfile):
+            logger.info("AppServer is stopped. Stale PID file %r detected.", self.pidfile.path)
+            return
+
+        logger.info("AppServer is active.")
+        self.job_manager = JobManager()
+        self.job_manager.report_jobs()
+
     action_funcs = {
         u'start': _start,
         u'stop': _stop,
@@ -325,6 +335,7 @@ class DaemonRunner(object):
         u'reload': _reload,
         u'pause': _pause,
         u'run': _run,
+        u'status' : _status,
     }
 
     def _get_action_func(self):
@@ -341,28 +352,25 @@ class DaemonRunner(object):
                 u"Unknown action: %r" % self.action)
         return func
 
+    def stop(self, signum, frame):
+        logger.info("Received stop command")
+        self.job_manager.stop()
+
     def cleanup(self, signum, frame):
         logger.info("Received terminate command")
-        self.job_manager.shutdown()
-        logger.info("Shutdown")
-        logging.shutdown()
-        sys.exit(0)
+        self.job_manager.terminate()
 
     def reload_config(self, signum, frame):
         logger.info("Received reload command")
-        logger.debug("PWD: %s", os.getcwd())
-        conf.load(conf.config_file)
-        self.job_manager.clear()
-        self.job_manager.init()
-        logger.info("Reload complete")
+        self.job_manager.reload_config()
 
     def pause(self, signum, frame):
         logger.info("Received pause command")
-        self.job_manager.stop()
+        self.job_manager.stop_queue()
 
     def unpause(self, signum, frame):
         logger.info("Received run command")
-        self.job_manager.start()
+        self.job_manager.start_queue()
 
     def run(self):
         """ Perform the requested action. """

@@ -5,6 +5,7 @@ Main module of CISAppServer. Responsible for job management.
 """
 
 import os
+import sys
 import shutil
 import time
 import logging
@@ -48,6 +49,10 @@ class JobManager(object):
             elif _scheduler == 'ssh':
                 SchedulerStore[_scheduler] = SshScheduler()
 
+        # Main loop run guard
+        self.__running = True
+        self.__terminate = False
+        self.__reload_config = False
         # State of the job queue
         self.__queue_running = True
         # Size of service output data last time quota was exceeded
@@ -78,6 +83,9 @@ class JobManager(object):
         """
 
         logger.log(VERBOSE, '@JManager - Check for new jobs.')
+
+        # Reset unit of work timer
+        self.__start_unit_timer()
 
         _now = datetime.utcnow()
         # Wait timeout
@@ -125,6 +133,10 @@ class JobManager(object):
 
             # Check for job slots left
             if _i >= _new_slots:
+                break
+
+            # Check for unit of work time left
+            if not self.__check_unit_timer():
                 break
 
             # Check if the job was flagged to wait and skip it if the wait
@@ -186,6 +198,7 @@ class JobManager(object):
                          exc_info=True, exit_code=ExitCodes.Validate)
                 continue
 
+            logger.debug('@JManager - Check available resources.')
             _service_name = _job.status.service
             _service = ServiceStore[_service_name]
             # Check available service slots
@@ -246,9 +259,11 @@ class JobManager(object):
 
             # Run submit in separate threads
             try:
+                logger.debug('@JManager - Change jobs state and commit to the DB.')
                 # Mark job as in processing state and commit to DB
                 _job.processing()
                 StateManager.commit()
+                logger.debug('@JManager - Start submit thread')
                 # The sub thread cannot use the same Job instance or the same
                 # DB session as the main one. Pass the JobID istead so that the
                 # thread can create its own instances.
@@ -304,7 +319,14 @@ class JobManager(object):
 
         logger.log(VERBOSE, '@JManager - Check for jobs marked for cleanup.')
 
+        # Reset unit of work timer
+        self.__start_unit_timer()
+
         for _job in StateManager.get_job_list("closing"):
+            # Check for unit of work time left
+            if not self.__check_unit_timer():
+                break
+
             logger.debug('@JManager - Detected cleanup job %s.', _job.id())
 
             # Check for valid input data
@@ -450,12 +472,19 @@ class JobManager(object):
             if _job.get_flag(JobState.FLAG_DELETE):
                 continue
 
+            # Skip not affected states
+            _state = _job.get_state()
+            if _state in ('new', 'waiting', 'processing', 'queued', 'closing',
+                    'cleanup'):
+                continue
+
+            logger.log(VERBOSE, "Job %s, State:%s, Status:%s", _job.id(), _state, str(_job.status))
+
             # Check the MAX job lifetime defined by the service
             _delete_dt = ServiceStore[_job.status.service].config['max_lifetime']
             if _delete_dt == 0:
                 continue
 
-            _state = _job.get_state()
             _now = datetime.utcnow()
             _dt = timedelta(hours=_delete_dt)
             _path_time = None
@@ -498,7 +527,7 @@ class JobManager(object):
         for (_count, _key) in _results:
             _states[_key] = _count
 
-        logger.debug("Jobs - w:%s, p:%s, q:%s, r:%s, s:%s, c:%s, d:%s, f:%s, "
+        logger.info("Jobs - w:%s, p:%s, q:%s, r:%s, s:%s, c:%s, d:%s, f:%s, "
                 "a:%s, k:%s.", _states['waiting'], _states['processing'],
                 _states['queued'], _states['running'], _states['closing'],
                 _states['cleanup'], _states['done'], _states['failed'],
@@ -670,61 +699,78 @@ class JobManager(object):
         """
         Stop all running jobs.
         """
+        logger.info("Starting shutdown")
+
         # Wait for processing threads to finish
         time.sleep(conf.config_shutdown_time)
         StateManager.expire_session()
 
         # Kill running, queued and waiting jobs
-        for _job in StateManager.get_job_list():
-            _state = _job.get_state()
-            if _state in ('queued', 'running'):
-                _scheduler = SchedulerStore[_job.status.scheduler]
-                try:
-                    _scheduler.stop(_job, 'Server shutdown', ExitCodes.Shutdown)
-                except CisError as e: # Temporary job stop problem
-                    continue
-                except:
-                    job.die("@PBS - Unable to terminate job %s." %
-                            _job.id(), exc_info=True)
-                continue
-            elif _state == 'waiting':
-                _job.finish('Server shutdown', state='killed',
-                            exit_code=ExitCodes.Shutdown)
+        if self.__terminate:
+            for _job in StateManager.get_job_list():
+                _state = _job.get_state()
+                if _state in ('queued', 'running'):
+                    _scheduler = SchedulerStore[_job.status.scheduler]
+                    try:
+                        _scheduler.stop(_job, 'Server shutdown', ExitCodes.Shutdown)
+                    except CisError as e: # Temporary job stop problem
+                        continue
+                    except:
+                        _job.die("@PBS - Unable to terminate job %s." %
+                                _job.id(), exc_info=True)
+            # Wait for PBS to kill the jobs
+            time.sleep(conf.config_shutdown_time)
 
-        # Wait for PBS to kill the jobs
-        time.sleep(conf.config_shutdown_time)
         # Check for jobs that got killed and lunch cleanup
         self.check_running_jobs()
         self.check_cleanup()
         time.sleep(conf.config_shutdown_time)
 
         for _thread in self.__thread_list:
-            # @TODO Kill the thread
-            _thread.join()
+            # There is no way to safely kill a python thread that is performing
+            # a blocking IO. Call a join with timeout in hope that the cleanup
+            # finishes by then. Switching to multiprocessing.Process is not an
+            # option as we want to share the SSH spur context.
+            _thread.join(conf.config_shutdown_time)
             self.__thread_list.remove(_thread)
-            StateManager.expire_session()
             logger.debug("@JManager - Removed finished cleanup thread.")
+        StateManager.expire_session()
 
-        # Force killed state on leftovers
-        for _job in StateManager.get_job_list():
-            _state = _job.get_state()
-            if _state in ('done', 'failed', 'aborted', 'killed'):
-                continue
-            else:
-                _job.finish('Server shutdown', state='killed',
-                            exit_code=ExitCodes.Shutdown)
-                _job.exit()
+        if self.__terminate:
+            # Force killed state on leftovers
+            for _job in StateManager.get_job_list():
+                _state = _job.get_state()
+                if _state in ('done', 'failed', 'aborted', 'killed'):
+                    continue
+                else:
+                    _job.finish('Server shutdown', state='killed',
+                                exit_code=ExitCodes.Shutdown)
+                    _job.exit()
 
         # Pass the final state to AppGw
         StateManager.commit()
 
+        logger.info("Shutdown complete")
+        logging.shutdown()
+        sys.exit(0)
+
     def stop(self):
+        self.__running = False
+
+    def terminate(self):
+        self.__running = False
+        self.__terminate = True
+
+    def reload_config(self):
+        self.__reload_config = True
+
+    def stop_queue(self):
         """
         Pause the queue. New jobs will not be processed.
         """
         self.__queue_running = False
 
-    def start(self):
+    def start_queue(self):
         """
         Restart the queue.
         """
@@ -741,14 +787,23 @@ class JobManager(object):
         """
 
         _n = 0
-        while(1):
+        while(self.__running):
+            # Reload config if requested
+            if self.__reload_config:
+                conf.load(conf.config_file)
+                self.clear()
+                self.init()
+                logger.info("Reload complete")
+                self.__reload_config = False
+
             # Calculate last iteration execute time
             _exec_time = (datetime.utcnow() - self.__time_stamp).total_seconds()
             # Calculate required sleep time
             _dt = conf.config_sleep_time - _exec_time
             if _dt < 0:
-                logger.error("@JobManager - Main loop execution behind schedule by "
-                      "%s seconds.", _dt)
+                if _dt + conf.config_sleep_time < 0:
+                    logger.error("@JobManager - Main loop execution behind "
+                                 "schedule by %s seconds.", _dt)
                 _dt = 0
             # Sleep
             time.sleep(_dt)
@@ -766,10 +821,20 @@ class JobManager(object):
                 for _service in ServiceStore.keys():
                     self.collect_garbage(_service)
                 self.check_old_jobs()
-                self.report_jobs()
+                if conf.log_level == 'DEBUG' or conf.log_level == 'VERBOSE':
+                    self.report_jobs()
                 _n = 0
             self.check_finished_threads()
             self.check_deleted_jobs()
             StateManager.commit()
             StateManager.poll_gw()
             _n += 1
+        self.shutdown()
+
+    def __check_unit_timer(self):
+        _exec_time = (datetime.utcnow() - self.__time_stamp_unit).total_seconds()
+        return (_exec_time < (2.0 * conf.config_sleep_time / 3.0))
+
+    def __start_unit_timer(self):
+        self.__time_stamp_unit = datetime.utcnow()
+

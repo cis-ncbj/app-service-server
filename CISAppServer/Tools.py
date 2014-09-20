@@ -18,6 +18,7 @@ import re
 import shutil
 import logging
 import spur
+import threading
 #import time
 
 from subprocess import Popen, PIPE, STDOUT
@@ -932,11 +933,16 @@ class PbsScheduler(Scheduler):
         """
 
         # Check that maximum job limit is not exceeded
-        # Use exclusive session to be thread safe
-        _session = StateManager.new_session()
-        _job_count = StateManager.get_job_count(scheduler=self.name,
-                session=_session)
-        _session.close()
+        # Use exclusive session to be thread safe, no need to pass the session
+        # from JobManager
+        _job_count = -1
+        try:
+            _session = StateManager.new_session()
+            _job_count = StateManager.get_job_count(scheduler=self.name,
+                    session=_session)
+            _session.close()
+        except:
+            logger.error("@PBS - Unable to connect to DB.", exc_info=True)
         if _job_count < 0:
             return False
         if _job_count >= self.max_jobs:
@@ -1009,6 +1015,7 @@ class PbsScheduler(Scheduler):
             job.die("@PBS - Unable to submit job %s." % job.id(), exc_info=True)
             return False
 
+        # @TODO Do I need DB session here???
         # Store the PBS job ID
         job.scheduler = SchedulerQueue(scheduler=self.name, id=_pbs_id, queue=_queue)
         # Reduce memory footprint
@@ -1190,12 +1197,15 @@ class SshScheduler(Scheduler):
         self.queue_path = conf.ssh_path_queue
         #: Default SSH execute host
         self.default_queue = conf.ssh_default_queue
+        # @TODO actually use this setting
         #: Dict of maximum number of concurent jobs per execution host
         self.max_jobs = conf.ssh_max_jobs
         #: Scheduler name
         self.name = "ssh"
         #: Dictionary of ssh hosts and connection objects
         self.hosts = {}
+        #: Lock for SSH scheduler
+        self.lock = threading.Lock()
 
     def submit(self, job):
         """
@@ -1212,10 +1222,16 @@ class SshScheduler(Scheduler):
             _queue = job.data.data['CIS_SSH_HOST']
 
         # Check that maximum job limit is not exceeded
-        _session = StateManager.new_session()
-        _job_count = StateManager.get_job_count(scheduler=self.name,
-                session=_session)
-        _session.close()
+        # Use exclusive session to be thread safe, no need to pass the session
+        # from JobManager
+        _job_count = -1
+        try:
+            _session = StateManager.new_session()
+            _job_count = StateManager.get_job_count(scheduler=self.name,
+                    session=_session)
+            _session.close()
+        except:
+            logger.error("@SSH - Unable to connect to DB.", exc_info=True)
         if _job_count < 0:
             return False
         if _job_count >= self.max_jobs:
@@ -1239,7 +1255,7 @@ class SshScheduler(Scheduler):
             _comm = [_shsub, "-i", job.id(), "-d", _work_dir, "-o",
                      _output_log, _run_script]
             logger.log(VERBOSE, "@SSH - Running command: %s", _comm)
-            _result = _ssh.run(_comm)
+            _result = _ssh.run(_comm, allow_error=True)
             _output = _result.output
             logger.log(VERBOSE, _output)
             # Hopefully shsub returned meaningful job ID
@@ -1298,7 +1314,7 @@ class SshScheduler(Scheduler):
                     _ssh = self.__get_ssh_connection(_queue, _usr)
                     _opts = [_shstat,]
                     logger.log(VERBOSE, "@SSH - Running command: %s", _opts)
-                    _result = _ssh.run(_opts)
+                    _result = _ssh.run(_opts, allow_error=True)
                     _output = _result.output
                     logger.log(VERBOSE, _output)
                     # Check return code. If ssh was not killed by signal Popen
@@ -1396,11 +1412,14 @@ class SshScheduler(Scheduler):
         _ssh = self.__get_ssh_connection(_queue, _usr)
         _opts = [_shdel, _pid]
         logger.log(VERBOSE, "@SSH - Running command: %s", _opts)
-        _result = _ssh.run(_opts)
+        _result = _ssh.run(_opts, allow_error=True)
         _output = _result.output
         logger.log(VERBOSE, _output)
         # Check return code. If ssh was not killed by signal Popen will
         # not rise an exception
+        if _result.return_code == 1:
+            logger.debug("Job %s already finished.", job.id())
+            return
         if _result.return_code != 0:
             raise OSError((
                 _result.return_code,
@@ -1412,19 +1431,26 @@ class SshScheduler(Scheduler):
         job.mark(msg, exit_code)
 
     def __get_ssh_connection(self, host_name, user_name):
-        # @TODO How thread safe this is?
         _login = "%s@%s" % (user_name, host_name)
+        self.lock.acquire()
         if _login in self.hosts.keys():
+            self.lock.release()
             return self.hosts[_login]
         else:
-            _ssh = spur.SshShell( # Assume default private key is valid
-                    hostname=host_name,
-                    username=user_name,
-                    # Workaround for paramiko not understanding host ecdsa keys.
-                    # @TODO If possible disable such keys on sshd at host and
-                    # remove this from production code.
-                    missing_host_key=spur.ssh.MissingHostKey.accept
-                    )
-            self.hosts[_login] = _ssh
+            try:
+                _ssh = spur.SshShell( # Assume default private key is valid
+                        hostname=host_name,
+                        username=user_name,
+                        # Workaround for paramiko not understanding host ecdsa keys.
+                        # @TODO If possible disable such keys on sshd at host and
+                        # remove this from production code.
+                        missing_host_key=spur.ssh.MissingHostKey.accept
+                        )
+                self.hosts[_login] = _ssh
+                # Establish the connection
+                _comm = ["/bin/hostname",]
+                _ssh.run(_comm)
+            finally:
+                self.lock.release()
             return _ssh
 

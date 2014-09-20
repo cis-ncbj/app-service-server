@@ -668,6 +668,7 @@ class StateManager(object):
         self.engine = create_engine(_DB, echo=_verbose)
         # Enforce foreign keys in SQLite
         self.engine.execute('pragma foreign_keys=on')
+        self.engine.execute('pragma journal_mode=WAL')
         #: Session factory
         self.session_factory = sessionmaker()
         self.session_factory.configure(bind=self.engine)
