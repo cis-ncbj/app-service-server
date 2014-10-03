@@ -574,7 +574,7 @@ class Scheduler(object):
         """Stop running job and remove it from execution queue."""
         raise NotImplementedError
 
-    def finalise(self, jid):
+    def finalise(self, job):
         """
         Prepare output of finished job.
 
@@ -583,22 +583,15 @@ class Scheduler(object):
         :param job: :py:class:`Job` instance
         """
 
+        _jid = job.id()
         _clean = True
 
-        logger.debug("@Scheduler - Retrive job output: %s", jid)
-        _work_dir = os.path.join(self.work_path, jid)
-
-        try:
-            _session = StateManager.new_session()
-            _job = StateManager.get_job(jid, _session)
-        except:
-            logger.error("@Scheduler - Unable to connect to DB.",
-                         exc_info=True)
-            raise
+        logger.debug("@Scheduler - Retrive job output: %s", _jid)
+        _work_dir = os.path.join(self.work_path, _jid)
 
         # Cleanup of the output
         try:
-            for _chain in _job.chain:
+            for _chain in job.chain:
                 shutil.rmtree(os.path.join(_work_dir, _chain.id),
                               ignore_errors=True)
         except:
@@ -608,8 +601,8 @@ class Scheduler(object):
         if os.path.isdir(_work_dir):
             try:
                 # Remove output dir if it exists.
-                _out_dir = os.path.join(conf.gate_path_output, jid)
-                _dump_dir = os.path.join(conf.gate_path_dump, jid)
+                _out_dir = os.path.join(conf.gate_path_output, _jid)
+                _dump_dir = os.path.join(conf.gate_path_dump, _jid)
                 if os.path.isdir(_out_dir):
                     logger.debug('@Scheduler - Remove existing output directory')
                     # out and dump should be on the same partition so that rename
@@ -638,40 +631,31 @@ class Scheduler(object):
                         os.chmod(_name, os.stat(_name).st_mode |
                                  stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
             except:
-                _job.die("@Scheduler - Unable to retrive job output directory %s" %
+                job.die("@Scheduler - Unable to retrive job output directory %s" %
                         _work_dir, exc_info=True)
                 _clean = False
 
         if not _clean:
-            try:
-                StateManager.commit(_session)
-                _session.close()
-            except:
-                logger.error("@Scheduler - Unable to finalize session.",
-                             exc_info=True)
             return
 
         # Remove job from scheduler queue if it was queued
         try:
-            _job.scheduler = None
+            job.scheduler = None
         except:
             logger.error("@Scheduler - Unable to remove job SchedulerQueue.",
                          exc_info=True)
 
         try:
             # Update service quota
-            ServiceStore[_job.status.service].update_job(_job)
+            ServiceStore[job.status.service].update_job(job)
             # Set job exit state
-            _job.exit()
-
-            StateManager.commit(_session)
-            _session.close()
+            job.exit()
         except:
             logger.error("@Scheduler - Unable to finalize cleanup.",
                          exc_info=True)
-        logger.debug("@Scheduler - job finalised: %s", jid)
+        logger.debug("@Scheduler - job finalised: %s", _jid)
 
-    def abort(self, jid):
+    def abort(self, job):
         """
         Cleanup aborted job.
 
@@ -680,10 +664,12 @@ class Scheduler(object):
         :param job: :py:class:`Job` instance
         """
 
-        logger.debug("@Scheduler - Cleanup job: %s", jid)
+        _jid = job.id()
 
-        _work_dir = os.path.join(self.work_path, jid)
-        _out_dir = os.path.join(conf.gate_path_output, jid)
+        logger.debug("@Scheduler - Cleanup job: %s", _jid)
+
+        _work_dir = os.path.join(self.work_path, _jid)
+        _out_dir = os.path.join(conf.gate_path_output, _jid)
         _clean = True
 
         # Remove output dir if it exists.
@@ -698,44 +684,31 @@ class Scheduler(object):
         if os.path.isdir(_out_dir):
             _clean = False
             logger.error("@Scheduler - Unable to remove job output directory: "
-                         "%s", jid, exc_info=True)
+                         "%s", _jid, exc_info=True)
         if os.path.isdir(_work_dir):
             _clean = False
             logger.error("@Scheduler - Unable to remove job working "
-                         "directory: %s", jid, exc_info=True)
+                         "directory: %s", _jid, exc_info=True)
         if _clean:
-            logger.info("Job %s cleaned directories.", jid)
-
-        try:
-            _session = StateManager.new_session()
-            _job = StateManager.get_job(jid, _session)
-        except:
-            logger.error("@Scheduler - Unable to connect to DB.",
-                         exc_info=True)
-            if _session is not None:
-                _session.close()
-            return
+            logger.info("Job %s cleaned directories.", _jid)
 
         # Remove job from scheduler queue if it was queued
         try:
-            _job.scheduler = None
+            job.scheduler = None
         except:
             logger.error("@Scheduler - Unable to remove job SchedulerQueue.",
                          exc_info=True)
 
-        logger.debug("@Scheduler - finalize cleanup: %s", jid)
+        logger.debug("@Scheduler - finalize cleanup: %s", _jid)
         try:
             # Update service quota
-            ServiceStore[_job.status.service].update_job(_job)
+            ServiceStore[job.status.service].update_job(job)
             # Set job exit state
-            _job.exit()
-
-            StateManager.commit(_session)
-            _session.close()
+            job.exit()
         except:
             logger.error("@Scheduler - Unable to finalize cleanup.",
                          exc_info=True)
-        logger.debug("@Scheduler - job abort finished: %s", jid)
+        logger.debug("@Scheduler - job abort finished: %s", _jid)
 
     def generate_scripts(self, job):
         """

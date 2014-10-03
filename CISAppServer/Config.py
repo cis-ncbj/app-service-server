@@ -61,6 +61,7 @@ class Config(dict):
 
         # Define default values
         self.config_file = None  #: Config file name
+        self.config_db = 'sqlite:///jobs.db'
         #: Sleep interval in seconds between job status queries
         self.config_sleep_time = 5
         #: Every n-th status query dump the progress logs
@@ -78,6 +79,8 @@ class Config(dict):
         self.config_default_scheduler = 'ssh'
         #: Maximum number of all active jobs
         self.config_max_jobs = 1000
+        #: Number of jobs to be batched together for submit/finalise threads
+        self.config_batch_jobs = 10
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
@@ -88,6 +91,7 @@ class Config(dict):
         self.daemon_path_installdir = \
             os.path.dirname(os.path.realpath(__file__))
         self.log_level = 'INFO'  #: Logging level
+        self.log_level_db = 'WARN' #: Logging level for DB calls
         self.log_output = '/tmp/CISAppServer.log'  #: Log output file name
         self.log_level_cli = None  #: Logging level CLI override
         self.log_output_cli = None  #: Log output file name CLI override

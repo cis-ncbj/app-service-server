@@ -5,15 +5,14 @@
 """
 
 import os
-import json
 import logging
-from subprocess import Popen, PIPE, STDOUT
 from datetime import datetime
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.mutable import Mutable
-from sqlalchemy import orm, event, create_engine, func
-from sqlalchemy.orm import relationship, backref, sessionmaker, deferred
+from sqlalchemy import event, create_engine, func
+from sqlalchemy.orm import relationship, backref, sessionmaker, deferred, \
+        joinedload, Session
 from sqlalchemy import Column, Integer, String, DateTime, PickleType, ForeignKey
 
 from Config import conf, VERBOSE, ExitCodes
@@ -98,13 +97,13 @@ class JobState(Base):
     #: Current job state
     state = Column(String)
     #: Jobs' Service
-    service = deferred(Column(String))
+    service = Column(String)
     #: Jobs' Scheduler
-    scheduler = deferred(Column(String))
+    scheduler = Column(String)
     #: Job exit message
     exit_message = deferred(Column(String))
     #: Job exit state
-    exit_state = deferred(Column(Integer))
+    exit_state = Column(Integer)
     #: Job exit code
     exit_code = deferred(Column(Integer))
     #: Time when job was submitted
@@ -112,7 +111,7 @@ class JobState(Base):
     #: Time when job execution started
     start_time = deferred(Column(DateTime))
     #: Time when job execution ended
-    stop_time = deferred(Column(DateTime))
+    stop_time = Column(DateTime)
     #: Time when wait flag was set
     wait_time = deferred(Column(DateTime))
 
@@ -230,6 +229,10 @@ def set_job_state_flags(target, value, oldvalue, initiator):
 def delete_job_state(mapper, connection, target):
     StateManager.cleanup(target)
 
+@event.listens_for(Session, 'before_flush')
+def flush_session(thissession, flush_context, instances):
+    logger.verbose("Flush of the ORM state to DB")
+
 
 class JobData(Base):
     """
@@ -312,7 +315,7 @@ class Job(Base):
     status_key = Column(Integer, ForeignKey('job_states.key'))
     #: Job state synchronized with AppGateway
     status = relationship("JobState", backref=backref('jobs', uselist=False),
-            cascade="all, delete-orphan", single_parent=True)
+            cascade="all, delete-orphan", single_parent=True, lazy="joined")
     #: Job parameters after validation
     data = relationship("JobData", uselist=False, backref='jobs',
             cascade="all, delete-orphan", single_parent=True)
@@ -339,6 +342,16 @@ class Job(Base):
             raise Exception("Unknown JobState type: %s." % type(job_state))
         elif job_state.id != job_id:
             raise Exception("Inconsistent job IDs: %s != %s" % (job_state.id, job_id))
+
+        _service = None
+        for _name in ServiceStore.keys():
+            if job_id.startswith(_name):
+                _service = _name
+        if _service is None:
+            raise Exception("Unknon Job service for job: %s." % job_id)
+        else:
+            job_state.service = _service
+
         self.status = job_state
         self.size = 0
         self.status.exit_code = ExitCodes.Undefined
@@ -410,6 +423,10 @@ class Job(Base):
         """
 
         return self.status.exit_state
+
+    def wait(self):
+        """ Mark job as in waiting state. """
+        self.__set_state('waiting')
 
     def processing(self):
         """ Mark job as in processing state. """
@@ -660,30 +677,52 @@ class StateManager(object):
     """
 
     def __init__(self):
-        _DB = 'sqlite:///jobs.db'
+        self.session_factory = None
+        self.session_factory_noflush = None
+        self.session = None
+
+    def init(self):
+        '''Initialize StateManager. Should be done explicitely after
+        configuration is loaded.'''
+        # Performing this at __init__ with the module singleton pattern will
+        # run the initialization before configuration and logging is setup
+        _log_levels = {
+                'ERROR': logging.ERROR,
+                'WARN': logging.WARN,
+                'INFO': logging.INFO,
+                'DEBUG': logging.DEBUG,
+                'VERBOSE': logging.DEBUG
+                }
+
         #: Turn on DB logging for verbose mode
-        _verbose = False
-        #_verbose = True
+        logging.getLogger('sqlalchemy.engine').setLevel(
+                _log_levels[conf.log_level_db])
+        logging.getLogger('sqlalchemy.orm').setLevel(
+                _log_levels[conf.log_level_db])
         #: DB engine
-        self.engine = create_engine(_DB, echo=_verbose)
+        self.engine = create_engine(conf.config_db)
         # Enforce foreign keys in SQLite
         self.engine.execute('pragma foreign_keys=on')
         self.engine.execute('pragma journal_mode=WAL')
         #: Session factory
         self.session_factory = sessionmaker()
         self.session_factory.configure(bind=self.engine)
+        self.session_factory_noflush = sessionmaker(autoflush=False)
+        self.session_factory_noflush.configure(bind=self.engine)
         #: DB session handle
         self.session = self.session_factory()
         # Create the tables in the DB
         #TODO what if the DB exists?
         Base.metadata.create_all(self.engine)
 
-    def new_session(self):
+    def new_session(self, autoflush=True):
         """
         Create new DB session.
 
         :return: session instance.
         """
+        if not autoflush:
+            return self.session_factory_noflush()
         return self.session_factory()
 
     def expire_session(self, session=None):
@@ -888,6 +927,39 @@ class StateManager(object):
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         # Order results by submit time
         _q = _q.order_by(JobState.submit_time)
+        # Execute query
+        return _q.all()
+
+    def get_job_list_byid(self, ids, session=None, full=False):
+        """
+        Get a list of jobs that are in a selected state.
+
+        :param ids:
+
+        :return: List of Job instances sorted by submit time.
+        :raises:
+        """
+        if session is None:
+            session = self.session
+
+        # Validate input
+        if not len(ids):
+            logger.error("Empty list of job IDS.")
+            return
+
+        # Build query
+        logger.debug("Build job query for ids: %s", ids)
+        _q = session.query(Job).join(JobState)
+        if full:
+            _q = _q.options(
+                    joinedload(Job.data),
+                    joinedload(Job.chain),
+                    joinedload(Job.scheduler)
+                    )
+        _q = _q.filter(JobState.id.in_(ids))
+        # Order results by submit time
+        _q = _q.order_by(JobState.submit_time)
+        logger.debug("Complete query: %s", str(_q))
         # Execute query
         return _q.all()
 
@@ -1177,6 +1249,8 @@ class FileStateManager(StateManager):
         logger.log(VERBOSE, "@FileStateManager: Push status changes to AppGW.")
         if session is None:
             session = self.session
+
+        session.flush()
 
         for _entry in session.query(JobState).filter(JobState.attr_dirty > 0):
             logger.log(VERBOSE, "@FileStateManager: Found dirty (%s) JobState (%s).",

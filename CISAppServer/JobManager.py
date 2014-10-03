@@ -33,6 +33,8 @@ class JobManager(object):
         Upon initialization stes up Validator and Sheduler interfaces.
         """
         self.init()
+        # Make sure state manager is initialized
+        StateManager.init()
 
     def init(self):
         """
@@ -69,6 +71,8 @@ class JobManager(object):
         self.__time_stamp = datetime.utcnow()
         # Thread list
         self.__thread_list = []
+        self.__thread_count_submit = 0
+        self.__thread_count_cleanup = 0
 
     def clear(self):
         ServiceStore.clear()
@@ -95,7 +99,11 @@ class JobManager(object):
 
         logger.log(VERBOSE, '@JManager - Run query.')
         # Count current active jobs
-        _active_count = StateManager.get_active_job_count()
+        try:
+            _active_count = StateManager.get_active_job_count()
+        except:
+            logger.error('Unable to contact with the DB.', exc_info=True)
+            return
 
         # Available job slots
         _new_slots = conf.config_max_jobs - _active_count
@@ -113,7 +121,12 @@ class JobManager(object):
             #        _service_active_count
 
         # Available job slots per service
-        _counters = StateManager.get_active_service_counters()
+        try:
+            _counters = StateManager.get_active_service_counters()
+        except:
+            logger.error('Unable to contact with the DB.', exc_info=True)
+            return
+
         _service_jobs = { _key : 0 for _key in ServiceStore.keys() }
         for (_count, _key) in _counters:
             _service_jobs[_key] = _count
@@ -127,7 +140,15 @@ class JobManager(object):
         logger.log(VERBOSE, '@JManager - Free service slots: %s.', _service_slots)
 
         _i = 0
-        for _job in StateManager.get_new_job_list():
+        _j = 0
+        _batch = []
+        try:
+            _job_list = StateManager.get_new_job_list()
+        except:
+            logger.error('Unable to contact with the DB.', exc_info=True)
+            return
+        logger.debug("Detected %s new jobs", len(_job_list))
+        for _job in _job_list:
             if _job.get_flag(JobState.FLAG_DELETE):
                 continue
 
@@ -179,26 +200,6 @@ class JobManager(object):
                 pass
 
             logger.debug('@JManager - Detected new job %s.', _job.id())
-
-            # Validate input
-            try:
-                self.validator.validate(_job)
-            except ValidatorInputFileError as e:
-                # The input file is not available yet. Flag the job to wait.
-                _job.set_flag(JobState.FLAG_WAIT_INPUT)
-                _job.status.wait_time = datetime.utcnow()
-                logger.log(VERBOSE, '@JManager - Job flagged to wait for input.')
-                continue
-            except ValidatorError as e:
-                _job.die("@JManager - Job %s validation failed." % _job.id(),
-                         exc_info=True, err=False, exit_code=ExitCodes.Validate)
-                continue
-            except:
-                _job.die("@JManager - Job %s validation failed." % _job.id(),
-                         exc_info=True, exit_code=ExitCodes.Validate)
-                continue
-
-            logger.debug('@JManager - Check available resources.')
             _service_name = _job.status.service
             _service = ServiceStore[_service_name]
             # Check available service slots
@@ -221,6 +222,7 @@ class JobManager(object):
                 continue
             else:
                 self.__w_counter_slots[_service_name] = 0
+            # @TODO should be moved?? from here for batch submits??
             # Check the service quota
             if _service.is_full():
                 # Limit the number of warning messages
@@ -257,29 +259,27 @@ class JobManager(object):
                     _service.current_size
                 self.__w_counter_quota[_service_name] = 0
 
-            # Run submit in separate threads
-            try:
-                logger.debug('@JManager - Change jobs state and commit to the DB.')
-                # Mark job as in processing state and commit to DB
-                _job.processing()
-                StateManager.commit()
-                logger.debug('@JManager - Start submit thread')
-                # The sub thread cannot use the same Job instance or the same
-                # DB session as the main one. Pass the JobID istead so that the
-                # thread can create its own instances.
-                _thread = threading.Thread(
-                        target=self.submit, args=(_job.id(),),
-                        name="Submit_%s"%_job.id()[0:15])
-                _thread.start()
-                self.__thread_list.append(_thread)
-                logger.debug("@JManager - Submit thread started "
-                             "for job %s", _job.id())
-                _service_slots[_service_name] -= 1  # Mark slot as used
-            except:
-                logger.error("@JManager - Unable to start submit thread "
-                             "for job %s", _job.id(), exc_info=True)
-
+            _batch.append(_job)
+            _service_slots[_service_name] -= 1  # Mark slot as used
+            _j += 1
             _i += 1  # Mark slot as used
+
+            logger.debug("Batch size: %s / %s.", _j, conf.config_batch_jobs)
+            if _j >= conf.config_batch_jobs:
+                self.batch_submit(_batch)
+                _j = 0
+                _batch = []
+                # Run batch select to refresh ORM state in one go after commit
+                # in batch_submit. Otherwise a SELECT is issued for each job.
+                # @TODO test if this is required
+                try:
+                    StateManager.get_job_list("waiting")
+                except:
+                    logger.error('Unable to contact with the DB.', exc_info=True)
+                    return
+
+        if len(_batch):
+            self.batch_submit(_batch)
 
     def check_running_jobs(self):
         """
@@ -292,7 +292,11 @@ class JobManager(object):
 
         # Loop over supported schedulers
         for _sname, _scheduler in SchedulerStore.items():
-            _jobs = StateManager.get_job_list(scheduler=_sname)
+            try:
+                _jobs = StateManager.get_job_list(scheduler=_sname)
+            except:
+                logger.error('Unable to contact with the DB.', exc_info=True)
+                continue
             _jobs_active = []
             for _job in _jobs:
                 # Scheduler can change state for only running and waiting jobs.
@@ -322,7 +326,15 @@ class JobManager(object):
         # Reset unit of work timer
         self.__start_unit_timer()
 
-        for _job in StateManager.get_job_list("closing"):
+        _i = 0
+        _batch = []
+        try:
+            _job_list = StateManager.get_job_list("closing")
+        except:
+            logger.error('Unable to contact with the DB.', exc_info=True)
+            return
+
+        for _job in _job_list:
             # Check for unit of work time left
             if not self.__check_unit_timer():
                 break
@@ -335,34 +347,17 @@ class JobManager(object):
                          "state defined." % _job.id())
                 continue
 
-            _scheduler = SchedulerStore[_job.status.scheduler]
             # Run cleanup in separate threads
-            try:
-                # Mark job as in cleanup state and commit to DB
-                _job.cleanup()
-                StateManager.commit()
-                # The sub thread cannot use the same Job instance or the same
-                # DB session as the main one. Pass the JobID istead so that the
-                # thread can create its own instances.
-                if _job.get_exit_state() == 'aborted':
-                    _thread = threading.Thread(
-                        target=_scheduler.abort, args=(_job.id(),),
-                        name="Abort_%s"%_job.id()[0:15])
-                    _thread.start()
-                    self.__thread_list.append(_thread)
-                    logger.debug("@JManager - Abort cleanup thread started "
-                                 "for job %s", _job.id())
-                else:
-                    _thread = threading.Thread(
-                        target=_scheduler.finalise, args=(_job.id(),),
-                        name="Final_%s"%_job.id()[0:15])
-                    _thread.start()
-                    self.__thread_list.append(_thread)
-                    logger.debug("@JManager - Finalise cleanup thread started "
-                                 "for job %s", _job.id())
-            except:
-                logger.error("@JManager - Unable to start cleanup thread "
-                             "for job %s", _job.id(), exc_info=True)
+            _batch.append(_job)
+            _i += 1
+
+            if _i >= conf.config_batch_jobs:
+                self.batch_cleanup(_batch)
+                _i = 0
+                _batch = []
+
+        if len(_batch):
+            self.batch_cleanup(_batch)
 
     def check_job_kill_requests(self):
         """
@@ -373,7 +368,13 @@ class JobManager(object):
 
         logger.log(VERBOSE, '@JManager - Check for kill requests.')
 
-        for _job in StateManager.get_job_list(flag=JobState.FLAG_STOP):
+        try:
+            _job_list = StateManager.get_job_list(flag=JobState.FLAG_STOP)
+        except:
+            logger.error('Unable to contact with the DB.', exc_info=True)
+            return
+
+        for _job in _job_list:
             logger.debug('@JManager - Detected job marked for a kill: %s' %
                          _job.id())
 
@@ -651,49 +652,162 @@ class JobManager(object):
 
         return False
 
-    def submit(self, jid):
+    def batch_submit(self, batch):
+        _job_ids = []
+        # Run submit in separate threads
+        for _job in batch:
+            try:
+                _job.processing()
+                _job_ids.append(_job.id())
+            except:
+                _job.die("Unable to change state.")
+
+        if not self.__commit():
+            return
+
+        try:
+            logger.debug('@JManager - Start submit thread')
+            # The sub thread cannot use the same Job instance or the same
+            # DB session as the main one. Pass the JobID istead so that the
+            # thread can create its own instances.
+            _thread = threading.Thread(
+                    target=self.submit, args=(_job_ids,),
+                    name="Submit_%s"%self.__thread_count_submit)
+            _thread.start()
+            self.__thread_list.append(_thread)
+            logger.debug("@JManager - Submit thread %s started.",
+                         self.__thread_count_submit)
+            self.__thread_count_submit += 1
+        except:
+            logger.error("@JManager - Unable to start submit thread %s",
+                         self.__thread_count_submit, exc_info=True)
+
+    def submit(self, job_ids):
         """
         Generate job related scripts and submit them to selected scheduler.
 
         :param job: The Job object to submit.
         :return: True on success, False otherwise.
         """
+        logger.debug("Submit batch of %s jobs.", len(job_ids))
+
         try:
-            _session = StateManager.new_session()
-            _job = StateManager.get_job(jid, _session)
+            _session = StateManager.new_session(autoflush=False)
+            # Do an eager load so that no more SELECT statements are issued.
+            # This should prevent issuing update statements on job changes
+            # untli commit is issued and will prevent the DB lock.
+            _jobs = StateManager.get_job_list_byid(job_ids, session=_session, full=True)
         except:
             logger.error("@JobManager - Unable to connect to DB.",
                          exc_info=True)
             return
 
-        # During validation default values are set in Job.valid_data
-        # Now we can access scheduler selected for current Job
-        try:
-            _scheduler = SchedulerStore[_job.status.scheduler]
-            _service = ServiceStore[_job.status.service]
-        except:
-            logger.error("@JobManager - Unable to obtain scheduler and "
-                         "service instance.", exc_info=True)
-            return
-        # Ask scheduler to generate scripts and submit the job
-        try:
-            if _scheduler.generate_scripts(_job):
-                if _scheduler.chain_input_data(_job):
-                    if _scheduler.submit(_job):
-                        _job.queue()
-                        _service.add_job_proxy(_job)
-        except:
-            logger.error("@JobManager - Unable to submit job.", exc_info=True)
+        for _job in _jobs:
+            _jid = _job.id()
+
+            # Validate input
+            try:
+                self.validator.validate(_job)
+            except ValidatorInputFileError as e:
+                # The input file is not available yet. Flag the job to wait.
+                _job.set_flag(JobState.FLAG_WAIT_INPUT)
+                _job.status.wait_time = datetime.utcnow()
+                _job.wait()
+                logger.log(VERBOSE, '@JManager - Job flagged to wait for input.')
+                continue
+            except ValidatorError as e:
+                _job.die("@JManager - Job %s validation failed." % _job.id(),
+                         exc_info=True, err=False, exit_code=ExitCodes.Validate)
+                continue
+            except:
+                _job.die("@JManager - Job %s validation failed." % _job.id(),
+                         exc_info=True, exit_code=ExitCodes.Validate)
+                continue
+
+            # During validation default values are set in Job.valid_data
+            # Now we can access scheduler selected for current Job
+            try:
+                _scheduler = SchedulerStore[_job.status.scheduler]
+                _service = ServiceStore[_job.status.service]
+            except:
+                logger.error("@JobManager - Unable to obtain scheduler and "
+                             "service instance.", exc_info=True)
+                continue
+            # Ask scheduler to generate scripts and submit the job
+            try:
+                if _scheduler.generate_scripts(_job):
+                    if _scheduler.chain_input_data(_job):
+                        if _scheduler.submit(_job):
+                            _job.queue()
+                            _service.add_job_proxy(_job)
+            except:
+                logger.error("@JobManager - Unable to submit job.", exc_info=True)
+                continue
+
+        self.__commit(_session)
+        logger.debug("Job submit thread finished.")
+
+    def batch_cleanup(self, batch):
+        _job_ids = []
+        # Run submit in separate threads
+        for _job in batch:
+            try:
+                _job.cleanup()
+                _job_ids.append(_job.id())
+            except:
+                _job.die('Unable to set job state.')
+
+        logger.debug('Change jobs state and commit to the DB.')
+        # Mark job as in processing state and commit to DB
+        if not self.__commit():
             return
 
         try:
-            StateManager.commit(_session)
-            _session.close()
+            logger.debug('Start cleanup thread')
+            # The sub thread cannot use the same Job instance or the same
+            # DB session as the main one. Pass the JobID istead so that the
+            # thread can create its own instances.
+            _thread = threading.Thread(
+                    target=self.cleanup, args=(_job_ids,),
+                    name="Cleanup_%s"%self.__thread_count_cleanup)
+            _thread.start()
+            self.__thread_list.append(_thread)
+            logger.debug("@JManager - Cleanup thread %s started.",
+                         self.__thread_count_cleanup)
+            self.__thread_count_cleanup += 1
         except:
-            logger.error("@JobManager - Unable to finalize job submission.",
+            logger.error("@JManager - Unable to start cleanup thread %s",
+                         self.__thread_count_cleanup, exc_info=True)
+
+    def cleanup(self, job_ids):
+        """
+        """
+        logger.debug("Cleanup batch of %s jobs.", len(job_ids))
+
+        try:
+            _session = StateManager.new_session(autoflush=False)
+            _jobs = StateManager.get_job_list_byid(job_ids, session=_session, full=True)
+        except:
+            logger.error("@JobManager - Unable to connect to DB.",
                          exc_info=True)
             return
-        logger.debug("@JobManager - job submitted: %s", jid)
+
+        for _job in _jobs:
+            _jid = _job.id()
+
+            try:
+                _scheduler = SchedulerStore[_job.status.scheduler]
+                if _job.get_exit_state() == 'aborted':
+                    _scheduler.abort(_job)
+                else:
+                    _scheduler.finalise(_job)
+            except:
+                logger.error("Job %s cleanup not finished with error.",
+                             _jid, exc_info=True)
+                continue
+
+        self.__commit(_session)
+        logger.debug("Job cleanup thread finished.")
 
     def shutdown(self):
         """
@@ -748,7 +862,7 @@ class JobManager(object):
                     _job.exit()
 
         # Pass the final state to AppGw
-        StateManager.commit()
+        self.__commit()
 
         logger.info("Shutdown complete")
         logging.shutdown()
@@ -826,7 +940,7 @@ class JobManager(object):
                 _n = 0
             self.check_finished_threads()
             self.check_deleted_jobs()
-            StateManager.commit()
+            self.__commit()
             StateManager.poll_gw()
             _n += 1
         self.shutdown()
@@ -837,4 +951,21 @@ class JobManager(object):
 
     def __start_unit_timer(self):
         self.__time_stamp_unit = datetime.utcnow()
+
+    def __commit(self, session=None):
+        _commit = False
+        _i = 0
+        while not _commit and _i < 5:
+            try:
+                StateManager.commit(session)
+                if session is not None:
+                    session.close()
+                _commit = True
+                logger.debug("Commit to DB successfull.")
+            except:
+                logger.error('Unable to commit changes to DB.', exc_info=True)
+                _i += 1
+
+        return _commit
+
 
