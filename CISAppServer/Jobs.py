@@ -7,6 +7,7 @@
 import os
 import logging
 from datetime import datetime
+from subprocess import Popen, PIPE, STDOUT
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.mutable import Mutable
@@ -753,8 +754,8 @@ class StateManager(object):
         try:
             session.commit()
         except:
-            logger.error("@StateManager - Commit failed.", exc_info=True)
             session.rollback()
+            raise
 
     def flush(self, session=None):
         """
@@ -1232,6 +1233,9 @@ class FileStateManager(StateManager):
 
         logger.log(VERBOSE, u"@FileStateManager - New job requests: %s", len(_list))
 
+        # Limit number of jobs to process in one go
+        if len(_list) > (conf.config_batch_jobs * conf.config_max_threads):
+            _list = _list[0:(conf.config_batch_jobs * conf.config_max_threads)]
         for _jid in _list:
             # Create new Job instance. It will be created in 'waiting' state
             _job = self.new_job(_jid)
@@ -1250,7 +1254,11 @@ class FileStateManager(StateManager):
         if session is None:
             session = self.session
 
-        session.flush()
+        try:
+            session.flush()
+        except:
+            session.rollback()
+            raise
 
         for _entry in session.query(JobState).filter(JobState.attr_dirty > 0):
             logger.log(VERBOSE, "@FileStateManager: Found dirty (%s) JobState (%s).",
