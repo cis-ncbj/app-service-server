@@ -72,8 +72,10 @@ do
             # No .dat file present - something went wrong
             echo "$PID -2"
         fi
-        # Remove info about finished processes
-        rm -f $ID
-        rm -f $STATE
     fi
 done
+
+# Remove info about processes finished more than an hour ago
+find $DIR -name "*.dat" -type f -mmin +60 | sed 's/\.dat/\.id/' | xargs rm -f
+find $DIR -name "*.dat" -type f -mmin +60 -delete
+
