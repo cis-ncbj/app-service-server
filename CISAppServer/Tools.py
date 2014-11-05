@@ -1052,10 +1052,10 @@ class PbsScheduler(Scheduler):
 
         # Iterate through jobs
         for _job in jobs:
-            _pbs_id = str(job.scheduler.id)
+            _pbs_id = str(_job.scheduler.id)
             # Check if the job exists in the PBS
             if _pbs_id not in _job_states.keys():
-                _job.die('@PBS - Job does not exist in the PBS')
+                _job.die('@PBS - Job %s does not exist in the PBS', _job.id())
             else:
                 # Update job progress output
                 self.progress(_job)
@@ -1315,10 +1315,11 @@ class SshScheduler(Scheduler):
         # Iterate through jobs
         for _job in jobs:
             _pid = str(_job.scheduler.id)
+            logger.log(VERBOSE, "Check job: %s - %s", _job.id(), _job.scheduler.id)
             # Check if the job exists on a SSH execution host
             if _pid not in _job_states.keys():
-                _job.die('@SSH - Job does not exist on any of the SSH '
-                         'execution hosts')
+                _job.die('@SSH - Job %s does not exist on any of the SSH '
+                         'execution hosts' % _job.id())
             else:
                 # Update job progress output
                 self.progress(_job)

@@ -81,6 +81,8 @@ class Config(dict):
         self.config_max_jobs = 1000
         #: Number of jobs to be batched together for submit/finalise threads
         self.config_batch_jobs = 10
+        #: Maximum number of active threads
+        self.config_max_threads = 4
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition

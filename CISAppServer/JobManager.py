@@ -70,7 +70,8 @@ class JobManager(object):
         # Time stamp for the last iteration
         self.__time_stamp = datetime.utcnow()
         # Thread list
-        self.__thread_list = []
+        self.__thread_list_submit = []
+        self.__thread_list_cleanup = []
         self.__thread_count_submit = 0
         self.__thread_count_cleanup = 0
 
@@ -158,6 +159,10 @@ class JobManager(object):
 
             # Check for unit of work time left
             if not self.__check_unit_timer():
+                break
+
+            # Do not exceed max thread limit
+            if len(self.__thread_list_submit) >= conf.config_max_threads:
                 break
 
             # Check if the job was flagged to wait and skip it if the wait
@@ -337,6 +342,10 @@ class JobManager(object):
         for _job in _job_list:
             # Check for unit of work time left
             if not self.__check_unit_timer():
+                break
+
+            # Do not exceed max thread limit
+            if len(self.__thread_list_cleanup) >= conf.config_max_threads:
                 break
 
             logger.debug('@JManager - Detected cleanup job %s.', _job.id())
@@ -544,10 +553,16 @@ class JobManager(object):
         _clean = True
 
         # Remove finished threads
-        for _thread in self.__thread_list:
+        for _thread in self.__thread_list_submit:
             if not _thread.is_alive():
                 _thread.join()
-                self.__thread_list.remove(_thread)
+                self.__thread_list_submit.remove(_thread)
+                _clean = False
+                logger.debug("@JManager - Removed finished subthread.")
+        for _thread in self.__thread_list_cleanup:
+            if not _thread.is_alive():
+                _thread.join()
+                self.__thread_list_cleanup.remove(_thread)
                 _clean = False
                 logger.debug("@JManager - Removed finished subthread.")
         if not _clean:
@@ -670,11 +685,12 @@ class JobManager(object):
             # The sub thread cannot use the same Job instance or the same
             # DB session as the main one. Pass the JobID istead so that the
             # thread can create its own instances.
+
             _thread = threading.Thread(
                     target=self.submit, args=(_job_ids,),
                     name="Submit_%s"%self.__thread_count_submit)
             _thread.start()
-            self.__thread_list.append(_thread)
+            self.__thread_list_submit.append(_thread)
             logger.debug("@JManager - Submit thread %s started.",
                          self.__thread_count_submit)
             self.__thread_count_submit += 1
@@ -767,11 +783,12 @@ class JobManager(object):
             # The sub thread cannot use the same Job instance or the same
             # DB session as the main one. Pass the JobID istead so that the
             # thread can create its own instances.
+
             _thread = threading.Thread(
                     target=self.cleanup, args=(_job_ids,),
                     name="Cleanup_%s"%self.__thread_count_cleanup)
             _thread.start()
-            self.__thread_list.append(_thread)
+            self.__thread_list_cleanup.append(_thread)
             logger.debug("@JManager - Cleanup thread %s started.",
                          self.__thread_count_cleanup)
             self.__thread_count_cleanup += 1
@@ -815,9 +832,15 @@ class JobManager(object):
         """
         logger.info("Starting shutdown")
 
+        # Make sure that jobs ready for cleanup start processing immediatelly
+        #StateManager.expire_session()
+        #self.check_cleanup()
         # Wait for processing threads to finish
+        #time.sleep(conf.config_shutdown_time)
+        #StateManager.expire_session()
         time.sleep(conf.config_shutdown_time)
-        StateManager.expire_session()
+        self.check_running_jobs()
+        self.check_cleanup()
 
         # Kill running, queued and waiting jobs
         if self.__terminate:
@@ -840,14 +863,22 @@ class JobManager(object):
         self.check_cleanup()
         time.sleep(conf.config_shutdown_time)
 
-        for _thread in self.__thread_list:
+        for _thread in self.__thread_list_submit:
             # There is no way to safely kill a python thread that is performing
             # a blocking IO. Call a join with timeout in hope that the cleanup
             # finishes by then. Switching to multiprocessing.Process is not an
             # option as we want to share the SSH spur context.
             _thread.join(conf.config_shutdown_time)
-            self.__thread_list.remove(_thread)
-            logger.debug("@JManager - Removed finished cleanup thread.")
+            self.__thread_list_submit.remove(_thread)
+            logger.debug("@JManager - Removed subthread.")
+        for _thread in self.__thread_list_cleanup:
+            # There is no way to safely kill a python thread that is performing
+            # a blocking IO. Call a join with timeout in hope that the cleanup
+            # finishes by then. Switching to multiprocessing.Process is not an
+            # option as we want to share the SSH spur context.
+            _thread.join(conf.config_shutdown_time)
+            self.__thread_list_cleanup.remove(_thread)
+            logger.debug("@JManager - Removed subthread.")
         StateManager.expire_session()
 
         if self.__terminate:
@@ -900,6 +931,9 @@ class JobManager(object):
         * Check for jobs to be removed - delete all related resources.
         """
 
+        import yappi
+        yappi.start()
+
         _n = 0
         while(self.__running):
             # Reload config if requested
@@ -918,9 +952,9 @@ class JobManager(object):
                 if _dt + conf.config_sleep_time < 0:
                     logger.error("@JobManager - Main loop execution behind "
                                  "schedule by %s seconds.", _dt)
-                _dt = 0
-            # Sleep
-            time.sleep(_dt)
+            else:
+                # Sleep
+                time.sleep(_dt)
             # Store new time stamp
             self.__time_stamp = datetime.utcnow()
 
@@ -943,6 +977,13 @@ class JobManager(object):
             self.__commit()
             StateManager.poll_gw()
             _n += 1
+
+        _stat = open("/tmp/AppServer.profile","w")
+        yappi.get_func_stats().print_all(out=_stat)
+        yappi.get_thread_stats().print_all(out=_stat)
+        _stat.close()
+        logger.debug("Main Loop End")
+
         self.shutdown()
 
     def __check_unit_timer(self):
@@ -963,9 +1004,12 @@ class JobManager(object):
                 _commit = True
                 logger.debug("Commit to DB successfull.")
             except:
-                logger.error('Unable to commit changes to DB.', exc_info=True)
                 _i += 1
+                if _i < 5:
+                    logger.warning('Commit to DB failed - retry.', exc_info=True)
+                else:
+                    logger.error('Unable to commit changes to DB.', exc_info=True)
+            time.sleep(0.2)
 
         return _commit
-
 
