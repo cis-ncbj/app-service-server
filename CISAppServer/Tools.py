@@ -646,8 +646,6 @@ class Scheduler(object):
                          exc_info=True)
 
         try:
-            # Update service quota
-            ServiceStore[job.status.service].update_job(job)
             # Set job exit state
             job.exit()
         except:
@@ -701,8 +699,6 @@ class Scheduler(object):
 
         logger.debug("@Scheduler - finalize cleanup: %s", _jid)
         try:
-            # Update service quota
-            ServiceStore[job.status.service].update_job(job)
             # Set job exit state
             job.exit()
         except:
@@ -1412,19 +1408,23 @@ class SshScheduler(Scheduler):
             return self.hosts[_login]
         else:
             try:
+                logger.log(VERBOSE, "Create new SSH connection.")
                 _ssh = spur.SshShell( # Assume default private key is valid
                         hostname=host_name,
                         username=user_name,
                         # Workaround for paramiko not understanding host ecdsa keys.
                         # @TODO If possible disable such keys on sshd at host and
                         # remove this from production code.
-                        missing_host_key=spur.ssh.MissingHostKey.accept
+                        missing_host_key=spur.ssh.MissingHostKey.accept,
+                        # Hack to speedup connection setup - use a minimal known_hosts file - requires a patch for spur
+                        known_hosts_file=conf.ssh_known_hosts
                         )
                 self.hosts[_login] = _ssh
                 # Establish the connection
                 _comm = ["/bin/hostname",]
                 _ssh.run(_comm)
             finally:
+                logger.log(VERBOSE, "SSH connection ready.")
                 self.lock.release()
             return _ssh
 

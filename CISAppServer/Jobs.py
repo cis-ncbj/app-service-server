@@ -349,7 +349,7 @@ class Job(Base):
             if job_id.startswith(_name):
                 _service = _name
         if _service is None:
-            raise Exception("Unknon Job service for job: %s." % job_id)
+            raise Exception("Unknown Job service for job: %s." % job_id)
         else:
             job_state.service = _service
 
@@ -432,6 +432,7 @@ class Job(Base):
     def processing(self):
         """ Mark job as in processing state. """
         self.__set_state('processing')
+        self.size = ServiceStore[self.status.service].config['job_size']
 
     def queue(self):
         """ Mark job as queued. """
@@ -518,6 +519,9 @@ class Job(Base):
             self.die("@Job - Exit status is not defined for job %s.",
                      self.id())
             return
+
+        # Update job size
+        self.calculate_size()
 
         # Generate the output status file
         try:
@@ -1165,6 +1169,49 @@ class StateManager(object):
         except:
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
+
+    def get_quota_service_counters(self, scheduler=None, flag=None, session=None):
+        """
+        Get a size of quota used by jobs per service.
+
+        :param str scheduler: if specified select only jobs that belong to
+            selected scheduler.
+        :param int flag: if specified select only jobs with the flag (or set of
+            flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
+        :param Session session: if specified use this session instance instead
+            of the default.
+
+        :return: Number of jobs in the selected state, or -1 in case of error.
+        """
+        if session is None:
+            session = self.session
+
+        _quota_count = []
+
+        # Validate input
+        if scheduler is not None and scheduler not in SchedulerStore.keys():
+            logger.error(
+                "@StateManager - unknown scheduler %s.", scheduler
+            )
+            return _quota_count
+        if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
+            logger.error("@StateManager - Unknown flag: %s", flag)
+            return _quota_count
+
+        # Build query
+        _q = session.query(func.sum(Job.size), JobState.service).join(JobState)
+        if scheduler is not None:
+            _q = _q.join(SchedulerQueue).\
+                 filter(SchedulerQueue.scheduler == scheduler)
+        if flag is not None:
+            _q = _q.filter(JobState.flags.op('&')(flag) > 0)
+        _q = _q.group_by(JobState.service)
+        # Execute query
+        try:
+            return _q.all()
+        except:
+            logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
+            return _quota_count
 
     def remove_flags(self, flag, service='all', session=None):
         """

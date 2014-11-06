@@ -163,6 +163,11 @@ class Config(dict):
         self.ssh_max_jobs = {
             'localhost': 2
         }
+        self.ssh_known_hosts = \
+                os.path.join(
+                    os.path.join(os.environ["HOME"], ".ssh"),
+                    "known_hosts"
+                )
         #: Path with services configuration files
         self.service_path_conf = 'Services'
         #: Path with services scripts and input files
