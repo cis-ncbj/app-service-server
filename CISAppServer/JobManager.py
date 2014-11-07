@@ -12,11 +12,11 @@ import logging
 import threading
 from datetime import datetime, timedelta
 
-from Tools import Validator, ValidatorInputFileError, ValidatorError, \
-        CisError, PbsScheduler, SshScheduler, rmtree_error
 from Config import conf, VERBOSE, ExitCodes
-from Jobs import Job, JobState, StateManager
-from DataStore import ServiceStore, SchedulerStore
+from Services import Validator, ValidatorInputFileError, ValidatorError, \
+        CisError, ServiceStore
+from Schedulers import SchedulerStore, rmtree_error
+from Jobs import JobState, StateManager
 
 version = "0.9"
 
@@ -43,13 +43,10 @@ class JobManager(object):
 
         Existing state is purged.
         """
-        # Initialize Validator and PbsManager
+        # Initialize schedulers and services
+        SchedulerStore.init()
+        ServiceStore.init()
         self.validator = Validator()  #: Validator instance
-        for _scheduler in conf.config_schedulers:
-            if _scheduler == 'pbs':
-                SchedulerStore[_scheduler] = PbsScheduler()
-            elif _scheduler == 'ssh':
-                SchedulerStore[_scheduler] = SshScheduler()
 
         # Main loop run guard
         self.__running = True
