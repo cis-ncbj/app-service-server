@@ -115,7 +115,7 @@ class Config(dict):
                     #'datefmt': '%m-%d %H:%M:%S',
                 },
                 'simple': {
-                    'format': '%(levelname)7s %(message)s'
+                    'format': '%(levelname)-8s %(message)s'
                 },
             },
             'handlers': {
@@ -135,12 +135,18 @@ class Config(dict):
                 },
                 'file': {
                     'level': self.log_level,
-                    'class': 'logging.handlers.RotatingFileHandler',
+                    'class': 'logging.FileHandler',
                     'formatter': 'verbose',
                     'filename': self.log_output,
-                    'maxBytes': 10000000,
-                    'backupCount': 5,
                 }
+#                'file': {
+#                    'level': self.log_level,
+#                    'class': 'logging.handlers.RotatingFileHandler',
+#                    'formatter': 'verbose',
+#                    'filename': self.log_output,
+#                    'maxBytes': 10000000,
+#                    'backupCount': 5,
+#                }
             },
             'root': {
                 'handlers': ['console', 'file', 'mail'],

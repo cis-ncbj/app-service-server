@@ -191,9 +191,6 @@ class DaemonRunner(object):
         if is_pidfile_stale(self.pidfile):
             self.pidfile.break_lock()
 
-        # Instatiate job_manager
-        self.job_manager = JobManager()
-
         # Start daemon context
         try:
             self.daemon_context.open()
@@ -208,6 +205,9 @@ class DaemonRunner(object):
             # Disable console logging
             _h = logging.root.handlers[0]
             logging.root.removeHandler(_h)
+
+            # Instatiate job_manager
+            self.job_manager = JobManager()
 
             self.job_manager.run()
         except Exception:
