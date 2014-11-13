@@ -10,6 +10,7 @@ import shutil
 import time
 import logging
 import threading
+import multiprocessing
 from datetime import datetime, timedelta
 
 from Config import conf, VERBOSE, ExitCodes
@@ -33,8 +34,6 @@ class JobManager(object):
         Upon initialization stes up Validator and Sheduler interfaces.
         """
         self.init()
-        # Make sure state manager is initialized
-        StateManager.init()
 
     def init(self):
         """
@@ -43,10 +42,11 @@ class JobManager(object):
 
         Existing state is purged.
         """
+        # Make sure state manager is initialized
+        StateManager.init()
         # Initialize schedulers and services
-        SchedulerStore.init()
         ServiceStore.init()
-        self.validator = Validator()  #: Validator instance
+        SchedulerStore.init()
 
         # Main loop run guard
         self.__running = True
@@ -67,15 +67,30 @@ class JobManager(object):
         # Time stamp for the last iteration
         self.__time_stamp = datetime.utcnow()
         # Thread list
+        self.__thread_lock = multiprocessing.Lock()
+        self.__thread_pool_submit = multiprocessing.Pool(
+                processes = conf.config_max_threads,
+                initializer = worker_init,
+                initargs=(conf, "SubmitWorker", self.__thread_lock)
+                )
+        self.__thread_pool_cleanup = multiprocessing.Pool(
+                processes = conf.config_max_threads,
+                initializer = worker_init,
+                initargs=(conf, "CleanupWorker", self.__thread_lock)
+                )
         self.__thread_list_submit = []
         self.__thread_list_cleanup = []
-        self.__thread_count_submit = 0
-        self.__thread_count_cleanup = 0
 
     def clear(self):
+        self.__thread_pool_submit.close()
+        self.__thread_pool_cleanup.close()
+        self.__thread_pool_submit.join()
+        self.__thread_pool_cleanup.join()
+        self.__thread_pool_submit = None
+        self.__thread_pool_cleanup = None
+        StateManager.clear()
         ServiceStore.clear()
         SchedulerStore.clear()
-        del self.validator
 
     def check_new_jobs(self):
         """
@@ -174,8 +189,8 @@ class JobManager(object):
                 break
 
             # Do not exceed max thread limit
-            if len(self.__thread_list_submit) >= conf.config_max_threads:
-                break
+            #if len(self.__thread_list_submit) >= conf.config_max_threads:
+            #    break
 
             # Check if the job was flagged to wait and skip it if the wait
             # timeout did not expire yet.
@@ -329,14 +344,15 @@ class JobManager(object):
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
 
+        logger.debug("Found %s jobs ready for cleanup", len(_job_list))
         for _job in _job_list:
             # Check for unit of work time left
             if not self.__check_unit_timer():
                 break
 
             # Do not exceed max thread limit
-            if len(self.__thread_list_cleanup) >= conf.config_max_threads:
-                break
+            #if len(self.__thread_list_cleanup) >= conf.config_max_threads:
+            #    break
 
             logger.debug('@JManager - Detected cleanup job %s.', _job.id())
 
@@ -542,17 +558,25 @@ class JobManager(object):
 
         # Remove finished threads
         for _thread in self.__thread_list_submit:
-            if not _thread.is_alive():
-                _thread.join()
+            if _thread.ready():
+                try:
+                    _thread.get()
+                except:
+                    logger.error("Subprocess raised an exception.",
+                            exc_info=True)
                 self.__thread_list_submit.remove(_thread)
                 _clean = False
-                logger.debug("@JManager - Removed finished subthread.")
+                logger.debug("Removed finished subprocess.")
         for _thread in self.__thread_list_cleanup:
-            if not _thread.is_alive():
-                _thread.join()
+            if not _thread.ready():
+                try:
+                    _thread.get()
+                except:
+                    logger.error("Subprocess raised an exception.",
+                            exc_info=True)
                 self.__thread_list_cleanup.remove(_thread)
                 _clean = False
-                logger.debug("@JManager - Removed finished subthread.")
+                logger.debug("Removed finished subprocess.")
         if not _clean:
             StateManager.expire_session()
 
@@ -672,7 +696,7 @@ class JobManager(object):
             except:
                 _job.die("Unable to change state.")
 
-        if not self.__commit():
+        if not StateManager.check_commit():
             return
 
         try:
@@ -681,80 +705,13 @@ class JobManager(object):
             # DB session as the main one. Pass the JobID istead so that the
             # thread can create its own instances.
 
-            _thread = threading.Thread(
-                    target=self.submit, args=(_job_ids,),
-                    name="Submit_%s"%self.__thread_count_submit)
-            _thread.start()
-            self.__thread_list_submit.append(_thread)
-            logger.debug("@JManager - Submit thread %s started.",
-                         self.__thread_count_submit)
-            self.__thread_count_submit += 1
+            _thread = self.__thread_pool_submit.apply_async(
+                    func=worker_submit, args=(_job_ids,))
+            #self.__thread_list_submit.append(_thread)
+            logger.debug("@JManager - Submit thread started.")
         except:
             logger.error("@JManager - Unable to start submit thread %s",
-                         self.__thread_count_submit, exc_info=True)
-
-    def submit(self, job_ids):
-        """
-        Generate job related scripts and submit them to selected scheduler.
-
-        :param job: The Job object to submit.
-        :return: True on success, False otherwise.
-        """
-        logger.debug("Submit batch of %s jobs.", len(job_ids))
-
-        try:
-            _session = StateManager.new_session(autoflush=False)
-            # Do an eager load so that no more SELECT statements are issued.
-            # This should prevent issuing update statements on job changes
-            # untli commit is issued and will prevent the DB lock.
-            _jobs = StateManager.get_job_list_byid(job_ids, session=_session, full=True)
-        except:
-            logger.error("@JobManager - Unable to connect to DB.",
                          exc_info=True)
-            return
-
-        for _job in _jobs:
-            _jid = _job.id()
-
-            # Validate input
-            try:
-                self.validator.validate(_job)
-            except ValidatorInputFileError as e:
-                # The input file is not available yet. Flag the job to wait.
-                _job.set_flag(JobState.FLAG_WAIT_INPUT)
-                _job.status.wait_time = datetime.utcnow()
-                _job.wait()
-                logger.log(VERBOSE, '@JManager - Job flagged to wait for input.')
-                continue
-            except ValidatorError as e:
-                _job.die("@JManager - Job %s validation failed." % _job.id(),
-                         exc_info=True, err=False, exit_code=ExitCodes.Validate)
-                continue
-            except:
-                _job.die("@JManager - Job %s validation failed." % _job.id(),
-                         exc_info=True, exit_code=ExitCodes.Validate)
-                continue
-
-            # During validation default values are set in Job.valid_data
-            # Now we can access scheduler selected for current Job
-            try:
-                _scheduler = SchedulerStore[_job.status.scheduler]
-            except:
-                logger.error("@JobManager - Unable to obtain scheduler and "
-                             "service instance.", exc_info=True)
-                continue
-            # Ask scheduler to generate scripts and submit the job
-            try:
-                if _scheduler.generate_scripts(_job):
-                    if _scheduler.chain_input_data(_job):
-                        if _scheduler.submit(_job):
-                            _job.queue()
-            except:
-                logger.error("@JobManager - Unable to submit job.", exc_info=True)
-                continue
-
-        self.__commit(_session)
-        logger.debug("Job submit thread finished.")
 
     def batch_cleanup(self, batch):
         _job_ids = []
@@ -768,7 +725,7 @@ class JobManager(object):
 
         logger.debug('Change jobs state and commit to the DB.')
         # Mark job as in processing state and commit to DB
-        if not self.__commit():
+        if not StateManager.check_commit():
             return
 
         try:
@@ -777,47 +734,13 @@ class JobManager(object):
             # DB session as the main one. Pass the JobID istead so that the
             # thread can create its own instances.
 
-            _thread = threading.Thread(
-                    target=self.cleanup, args=(_job_ids,),
-                    name="Cleanup_%s"%self.__thread_count_cleanup)
-            _thread.start()
-            self.__thread_list_cleanup.append(_thread)
-            logger.debug("@JManager - Cleanup thread %s started.",
-                         self.__thread_count_cleanup)
-            self.__thread_count_cleanup += 1
+            _thread = self.__thread_pool_cleanup.apply_async(
+                    func=worker_cleanup, args=(_job_ids,))
+            #self.__thread_list_cleanup.append(_thread)
+            logger.debug("@JManager - Cleanup thread %s started.")
         except:
             logger.error("@JManager - Unable to start cleanup thread %s",
-                         self.__thread_count_cleanup, exc_info=True)
-
-    def cleanup(self, job_ids):
-        """
-        """
-        logger.debug("Cleanup batch of %s jobs.", len(job_ids))
-
-        try:
-            _session = StateManager.new_session(autoflush=False)
-            _jobs = StateManager.get_job_list_byid(job_ids, session=_session, full=True)
-        except:
-            logger.error("@JobManager - Unable to connect to DB.",
                          exc_info=True)
-            return
-
-        for _job in _jobs:
-            _jid = _job.id()
-
-            try:
-                _scheduler = SchedulerStore[_job.status.scheduler]
-                if _job.get_exit_state() == 'aborted':
-                    _scheduler.abort(_job)
-                else:
-                    _scheduler.finalise(_job)
-            except:
-                logger.error("Job %s cleanup not finished with error.",
-                             _jid, exc_info=True)
-                continue
-
-        self.__commit(_session)
-        logger.debug("Job cleanup thread finished.")
 
     def shutdown(self):
         """
@@ -856,23 +779,13 @@ class JobManager(object):
         self.check_cleanup()
         time.sleep(conf.config_shutdown_time)
 
-        for _thread in self.__thread_list_submit:
-            # There is no way to safely kill a python thread that is performing
-            # a blocking IO. Call a join with timeout in hope that the cleanup
-            # finishes by then. Switching to multiprocessing.Process is not an
-            # option as we want to share the SSH spur context.
-            _thread.join(conf.config_shutdown_time)
-            self.__thread_list_submit.remove(_thread)
-            logger.debug("@JManager - Removed subthread.")
-        for _thread in self.__thread_list_cleanup:
-            # There is no way to safely kill a python thread that is performing
-            # a blocking IO. Call a join with timeout in hope that the cleanup
-            # finishes by then. Switching to multiprocessing.Process is not an
-            # option as we want to share the SSH spur context.
-            _thread.join(conf.config_shutdown_time)
-            self.__thread_list_cleanup.remove(_thread)
-            logger.debug("@JManager - Removed subthread.")
+        logger.debug("Closing subprocesses")
+        self.__thread_pool_submit.close()
+        self.__thread_pool_cleanup.close()
+        self.__thread_pool_submit.join()
+        self.__thread_pool_cleanup.join()
         StateManager.expire_session()
+        logger.debug("Subprocesses closed")
 
         if self.__terminate:
             # Force killed state on leftovers
@@ -886,7 +799,7 @@ class JobManager(object):
                     _job.exit()
 
         # Pass the final state to AppGw
-        self.__commit()
+        StateManager.check_commit()
 
         logger.info("Shutdown complete")
         logging.shutdown()
@@ -924,8 +837,8 @@ class JobManager(object):
         * Check for jobs to be removed - delete all related resources.
         """
 
-        import yappi
-        yappi.start()
+        #import yappi
+        #yappi.start()
 
         _n = 0
         while(self.__running):
@@ -952,6 +865,7 @@ class JobManager(object):
             self.__time_stamp = datetime.utcnow()
 
             # Execute loop
+            self.report_jobs()
             if self.__queue_running:  # Do not process queue in pause state
                 self.check_new_jobs()
             self.check_running_jobs()
@@ -961,19 +875,23 @@ class JobManager(object):
             if _n >= conf.config_garbage_step:
                 self.collect_garbage()
                 self.check_old_jobs()
-                if conf.log_level == 'DEBUG' or conf.log_level == 'VERBOSE':
-                    self.report_jobs()
+                #if conf.log_level == 'DEBUG' or conf.log_level == 'VERBOSE':
+                #    self.report_jobs()
                 _n = 0
             self.check_finished_threads()
             self.check_deleted_jobs()
-            self.__commit()
+            if not StateManager.check_commit():
+                time.sleep(5)
+                if not StateManager.check_commit():
+                    self.shutdown()
             StateManager.poll_gw()
+            self.report_jobs()
             _n += 1
 
-        _stat = open("/tmp/AppServer.profile","w")
-        yappi.get_func_stats().print_all(out=_stat)
-        yappi.get_thread_stats().print_all(out=_stat)
-        _stat.close()
+        #_stat = open("/tmp/AppServer.profile","w")
+        #yappi.get_func_stats().print_all(out=_stat)
+        #yappi.get_thread_stats().print_all(out=_stat)
+        #_stat.close()
         logger.debug("Main Loop End")
 
         self.shutdown()
@@ -985,23 +903,120 @@ class JobManager(object):
     def __start_unit_timer(self):
         self.__time_stamp_unit = datetime.utcnow()
 
-    def __commit(self, session=None):
-        _commit = False
-        _i = 0
-        while not _commit and _i < 5:
-            try:
-                StateManager.commit(session)
-                if session is not None:
-                    session.close()
-                _commit = True
-                logger.debug("Commit to DB successfull.")
-            except:
-                _i += 1
-                if _i < 5:
-                    logger.warning('Commit to DB failed - retry.', exc_info=True)
-                else:
-                    logger.error('Unable to commit changes to DB.', exc_info=True)
-            time.sleep(0.2)
 
-        return _commit
+def worker_init(config, work_id, lock):
+    """
+    Initialize worker process.
+
+    :param config: Config.Config instance.
+    """
+    threading.current_thread().name = "%s_%s" % (work_id, os.getpid())
+    # Initialize config
+    conf.update(config)
+    # Initialize logging
+    logging.config.dictConfig(conf.log_config)
+    # Disable console logging
+    _h = logging.root.handlers[0]
+    logging.root.removeHandler(_h)
+    # Initialize DB - has to be serialized
+    lock.acquire()
+    StateManager.init()
+    lock.release()
+    # Initialize services, shcdulers and validator
+    ServiceStore.init()
+    SchedulerStore.init()
+    Validator.init()
+
+def worker_submit(job_ids):
+    """
+    Generate job related scripts and submit them to selected scheduler.
+
+    :param job: The Job object to submit.
+    :return: True on success, False otherwise.
+    """
+    logger.debug("Submit batch of %s jobs.", len(job_ids))
+
+    try:
+        _session = StateManager.new_session(autoflush=False)
+        # Do an eager load so that no more SELECT statements are issued.
+        # This should prevent issuing update statements on job changes
+        # untli commit is issued and will prevent the DB lock.
+        _jobs = StateManager.get_job_list_byid(job_ids, session=_session, full=True)
+    except:
+        logger.error("Unable to connect to DB.",
+                     exc_info=True)
+        return
+
+    for _job in _jobs:
+        _jid = _job.id()
+
+        # Validate input
+        try:
+            Validator.validate(_job)
+        except ValidatorInputFileError as e:
+            # The input file is not available yet. Flag the job to wait.
+            _job.set_flag(JobState.FLAG_WAIT_INPUT)
+            _job.status.wait_time = datetime.utcnow()
+            _job.wait()
+            logger.log(VERBOSE, 'Job flagged to wait for input.')
+            continue
+        except ValidatorError as e:
+            _job.die("@worker_submit - Job %s validation failed." % _job.id(),
+                     exc_info=True, err=False, exit_code=ExitCodes.Validate)
+            continue
+        except:
+            _job.die("@worker_submit - Job %s validation failed." % _job.id(),
+                     exc_info=True, exit_code=ExitCodes.Validate)
+            continue
+
+        # During validation default values are set in Job.valid_data
+        # Now we can access scheduler selected for current Job
+        try:
+            _scheduler = SchedulerStore[_job.status.scheduler]
+        except:
+            logger.error("Unable to obtain scheduler and "
+                         "service instance.", exc_info=True)
+            continue
+        # Ask scheduler to generate scripts and submit the job
+        try:
+            if _scheduler.generate_scripts(_job):
+                if _scheduler.chain_input_data(_job):
+                    if _scheduler.submit(_job):
+                        _job.queue()
+        except:
+            logger.error("Unable to submit job.", exc_info=True)
+            continue
+
+    StateManager.check_commit(_session)
+    logger.debug("Job submit thread finished.")
+
+def worker_cleanup(job_ids):
+    """
+    """
+    logger.debug("Cleanup batch of %s jobs.", len(job_ids))
+
+    try:
+        _session = StateManager.new_session(autoflush=False)
+        _jobs = StateManager.get_job_list_byid(job_ids, session=_session, full=True)
+    except:
+        logger.error("Unable to connect to DB.",
+                     exc_info=True)
+        return
+
+    for _job in _jobs:
+        _jid = _job.id()
+
+        try:
+            _scheduler = SchedulerStore[_job.status.scheduler]
+            if _job.get_exit_state() == 'aborted':
+                _scheduler.abort(_job)
+            else:
+                _scheduler.finalise(_job)
+        except:
+            logger.error("Job %s cleanup not finished with error.",
+                         _jid, exc_info=True)
+            continue
+
+    StateManager.check_commit(_session)
+    logger.debug("Job cleanup thread finished.")
 

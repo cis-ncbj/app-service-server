@@ -729,6 +729,10 @@ class SshScheduler(Scheduler):
             logger.error("@SSH - Unable to connect to DB.", exc_info=True)
         if _job_count < 0:
             return False
+        # @TODO fix !!! self.max_jobs[_queue], check that queue is defined,
+        # otherwise use some default. What happens with the job when submit
+        # fails - switch to waiting state? What if someting is mosconfigured
+        # and it will never enter queue - max submit retries?
         if _job_count >= self.max_jobs:
             return False
 

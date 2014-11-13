@@ -6,6 +6,7 @@
 
 import os
 import logging
+import time
 from datetime import datetime
 from subprocess import Popen, PIPE, STDOUT
 
@@ -686,10 +687,12 @@ class StateManager(object):
         self.session_factory = None
         self.session_factory_noflush = None
         self.session = None
+        self.engine = None
 
     def init(self):
         '''Initialize StateManager. Should be done explicitely after
         configuration is loaded.'''
+        logger.debug("Initialize StateManager")
         # Performing this at __init__ with the module singleton pattern will
         # run the initialization before configuration and logging is setup
         _log_levels = {
@@ -720,6 +723,14 @@ class StateManager(object):
         # Create the tables in the DB
         #TODO what if the DB exists?
         Base.metadata.create_all(self.engine)
+        self.commit()
+        logger.debug("StateManager initialized")
+
+    def clear(self):
+        self.session.close()
+        self.engine = None
+        self.session_factory = None
+        self.session_factory_noflush = None
 
     def new_session(self, autoflush=True):
         """
@@ -761,6 +772,34 @@ class StateManager(object):
         except:
             session.rollback()
             raise
+
+    def check_commit(self, session=None):
+        """
+        Commit changes to the DB. Repeat several times in case of failure.
+        Invalidates SQLAlchemy ORM instances.
+
+        :param session: if specified use this session instance instead of the
+            default.
+        :return: True if succeded, False otherwise.
+        """
+        _commit = False
+
+        for _i in range(5):
+            try:
+                self.commit(session)
+                if session is not None:
+                    session.close()
+                _commit = True
+                logger.debug("Commit to DB successfull.")
+                break
+            except:
+                if _i < 4:
+                    logger.warning('Commit to DB failed - retry.', exc_info=True)
+                else:
+                    logger.error('Unable to commit changes to DB.', exc_info=True)
+            time.sleep(0.2)
+
+        return _commit
 
     def flush(self, session=None):
         """

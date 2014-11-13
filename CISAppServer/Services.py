@@ -57,7 +57,7 @@ class Validator(object):
 
     def __init__(self):
         """
-        Upon initialisation load services configuration.
+        Initialize defaults.
         """
 
         #: Min API level
@@ -70,6 +70,11 @@ class Validator(object):
         #self.job = None
         #: PluginManager instance
         self.pm = PluginManager()
+
+    def init(self):
+        """
+        Initialize Validator singleton.
+        """
 
         _plugins = []
         # @TODO What about shared plugins??
@@ -562,4 +567,8 @@ class ServiceStore(dict):
             logger.log(VERBOSE, json.dumps(self))
 
 
+#: Validator singleton
+Validator = Validator()
+#: ServiceStore singleton
 ServiceStore = ServiceStore()
+
