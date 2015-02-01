@@ -215,6 +215,9 @@ class Config(dict):
         #: Default expected output size of a job in MB. It is used to estimate
         #: space requirements for jobs that are to be scheduled.
         self.service_job_size = 50
+        #: Limit of nested Object type variables
+        #: should prevent from endless recursive validation
+        self.service_max_nesting_level = 1
         #: Path to the shared storage used as communication medium with
         #: AppGateway
         self.gate_path_shared = 'Shared'
