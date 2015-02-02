@@ -258,7 +258,7 @@ class Scheduler(object):
         # Verify that input dir contains "pbs.sh" script
         if not os.path.isfile(os.path.join(_script_dir, 'pbs.sh')):
             job.die("@Scheduler - Missing \"pbs.sh\" script for service %s." %
-                    job.service)
+                    job.status.service)
             return False
 
         # Create output dir
