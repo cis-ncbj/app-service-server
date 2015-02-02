@@ -410,7 +410,7 @@ class Validator(object):
                 return False
         elif variable_type == 'object':
             return True
-        #for any unknown variable types when for example there is an error in service config
+        # for any unknown variable types when for example there is an error in service config
         #whole function should return False, but i keep it that way for now
         else:
             return False
