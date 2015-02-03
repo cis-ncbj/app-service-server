@@ -313,7 +313,7 @@ class Validator(object):
                 )
                 return False
         elif variable_type == 'string_array':
-            if not isinstance(value, list) and isinstance(value, tuple):
+            if not isinstance(value, list) and not isinstance(value, tuple):
                 logger.error(
                     "@Validator - Value is not a proper array:  %s", key
                 )
@@ -336,7 +336,7 @@ class Validator(object):
                                    (key, value))
                     return False
         elif variable_type == 'int_array':
-            if not isinstance(value, list) and isinstance(value, tuple):
+            if not isinstance(value, list) and not isinstance(value, tuple):
                 logger.error(
                     "@Validator - Value is not a proper array:  %s", key
                 )
@@ -368,7 +368,7 @@ class Validator(object):
                 if not self.validate_int(key, _v, _min, _max):
                     return False
         elif variable_type == 'float_array':
-            if not isinstance(value, list) and isinstance(value, tuple):
+            if not isinstance(value, list) and not isinstance(value, tuple):
                 logger.error(
                     "@Validator - Value is not a proper array:  %s", key
                 )
@@ -409,29 +409,91 @@ class Validator(object):
                 )
                 return False
         elif variable_type == 'object':
-            inner_variables = {
-                _k: _v['default'] for _k, _v in variable_allowed_values.items()
-            }
-            for _k, _v in value.items():
-                if _k in conf.service_reserved_keys or _k.startswith('CIS_CHAIN'):
-                    raise ValidatorError(
-                        "@Validator - '%s' variable name is restricted." % _k)
-                elif _k in variable_allowed_values.keys():
-                   inner_variables[_k] = _v
-                else:
-                    raise ValidatorError(
-                        "@Validator - Not supported variable: %s." % _k)
-                print inner_variables
-            return False
+             # prevent from infinite recurrence
+            if nesting_level>=conf.service_max_nesting_level:
+                logger.error(
+                    "@Validator - Unsupported nesting level above %d :  %s" %
+                    (conf.service_max_nesting_level, key)
+                )
+                return False
+            if not isinstance(value, dict):
+                logger.error(
+                    "@Validator - Value is not a proper dictionary:  %s", key
+                )
+                return False
+            try:
+                return self.validate_object(value, variable_allowed_values)
+            except:
+                logger.error(
+                    "@Validator - One or more variables in object %s are invalid" %
+                    key
+                )
+                return False
+        elif variable_type == 'object_array':
+            if not isinstance(value, list) and not isinstance(value, tuple):
+                logger.error(
+                    "@Validator - Value is not a proper array:  %s", key
+                )
+                return False
+            try:
+                if len(value) > variable_allowed_values[0]:
+                    logger.error(
+                        "@Validator - Array exceeds allowed length:  %s", key
+                    )
+                    return False
+            except IndexError:
+                logger.error(
+                    "@Validator - Badly defined range for variable:  %s" %
+                    key
+                )
+                return False
+            if not isinstance(variable_allowed_values[1], dict):
+                logger.error(
+                    "@Validator - Badly defined schema for variable:  %s", key
+                )
+                return False
+            for _v in value:
+                if not self.validate_object(_v, variable_allowed_values[1]):
+                    return False
+
         # for any unknown variable types when for example there is an error in service config
         # whole function should return False, but i keep it that way for now
         else:
-             return False
+            return False
 
         return True
 
-    def validate_object(self):
-        pass
+    def validate_object(self, value, allowed_values):
+        """
+        :param value:
+        :param allowed_values:
+        :return:
+        """
+        # allowed_values = service.variables[key]['values']
+        inner_variables = {
+            _k: _v['default'] for _k, _v in allowed_values.items()
+        }
+        for _k, _v in value.items():
+            if _k in conf.service_reserved_keys or _k.startswith('CIS_CHAIN'):
+                logger.error(
+                    "@Validator - '%s' variable name is restricted." % ( _k))
+                return False
+            elif _k in allowed_values.keys():
+                # some recurrent stuff
+                if not self.validate_value(_k,_v,
+                                           type('service_spoof', (object,),
+                                                {'variables' : allowed_values}),
+                                           #service.variables[key],
+                                           nesting_level=1):
+                    # better to raise error?
+                    logger.error(
+                        "@Validator - Variable value not allowed: %s - %s." % (_k, _v))
+                    return False
+            else:
+                logger.error(
+                    "@Validator -  Not supported variable: %s." % ( _k))
+                return False
+        return True
 
     def validate_file(self, key, job, service):
         """
