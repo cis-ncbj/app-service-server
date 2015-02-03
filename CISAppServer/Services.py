@@ -402,20 +402,36 @@ class Validator(object):
         elif variable_type == 'datetime':
             try:
                 datetime.strptime(value, variable_allowed_values)
-            except:
+            except ValueError:
                 logger.error(
                     "@Validator - DateTime variable given in unsupported format:  %s" %
                     key
                 )
                 return False
         elif variable_type == 'object':
-            return True
-        # for any unknown variable types when for example there is an error in service config
-        #whole function should return False, but i keep it that way for now
-        else:
+            inner_variables = {
+                _k: _v['default'] for _k, _v in variable_allowed_values.items()
+            }
+            for _k, _v in value.items():
+                if _k in conf.service_reserved_keys or _k.startswith('CIS_CHAIN'):
+                    raise ValidatorError(
+                        "@Validator - '%s' variable name is restricted." % _k)
+                elif _k in variable_allowed_values.keys():
+                   inner_variables[_k] = _v
+                else:
+                    raise ValidatorError(
+                        "@Validator - Not supported variable: %s." % _k)
+                print inner_variables
             return False
+        # for any unknown variable types when for example there is an error in service config
+        # whole function should return False, but i keep it that way for now
+        else:
+             return False
 
         return True
+
+    def validate_object(self):
+        pass
 
     def validate_file(self, key, job, service):
         """
