@@ -49,7 +49,12 @@ def setup_module():
                     B=dict(
                         type="int_array",
                         default=[2, 3, 4],
-                        values=[3, 0, 10000])
+                        values=[3, 0, 10000]),
+                    C=dict(
+                        type="datetime",
+                        default="20151115 112000",
+                        values="%Y%m%d %H%M%S"
+                    )
                 )
             ),
             test_object_array=dict(
@@ -70,6 +75,27 @@ def setup_module():
             )
         )
     ))
+    ServiceStore['default'] = Service('test', dict(
+        config={},
+        sets={},
+        variables = {
+        "CIS_SCHEDULER" : {
+            "type" : "string",
+            "default" : "ssh",
+            "values" : ["pbs", "ssh"]
+        },
+        "CIS_QUEUE" : {
+            "type" : "string",
+            "default" : "test_slc6",
+            "values" : ["short", "long", "test_slc6"]
+        },
+        "CIS_SSH_HOST" : {
+            "type" : "string",
+            "default" : "localhost",
+            "values" : ["localhost"]
+        }
+        }
+    ))
 
 
 class TestValidator:
@@ -85,6 +111,8 @@ class TestValidator:
         """
         # job = Job('test_valid_job.json')
         # print self.valid_job.id()
+        Validator.validate(self.valid_job)
+        print self.valid_job.data.data
         eq_(1, 1, "OK")
 
     def test_validate_value_date(self):
