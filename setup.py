@@ -8,5 +8,11 @@ setup(
     license='',
     author='',
     author_email='',
-    description='', requires=['python-daemon','sqlalchemy', 'yapsy', 'spur','nose']
+    description='',
+    requires=['python-daemon',
+              'sqlalchemy',
+              'yapsy',
+              'spur',
+              'nose',
+              'jinja2']
 )

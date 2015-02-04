@@ -15,9 +15,11 @@ import threading
 
 from subprocess import Popen, PIPE, STDOUT
 
-import Services # Import full module - resolves circular dependencies
-import Jobs # Import full module - resolves circular dependencies
+import Services  # Import full module - resolves circular dependencies
+import Jobs  # Import full module - resolves circular dependencies
 from Config import conf, VERBOSE, ExitCodes
+
+from jinja2 import Environment, FileSystemLoader, Template
 
 logger = logging.getLogger(__name__)
 
@@ -53,8 +55,14 @@ class Scheduler(object):
         self.queue_path = None
         #: Default queue
         self.default_queue = None
-        #: Maximum number of concurent jobs
+        #: Maximum number of concurrent jobs
         self.max_jobs = None
+        #: Jinja2 environment configuration
+        self.template_env = Environment(
+            loader=FileSystemLoader(conf.service_path_data),
+            variable_start_string=r'@@{',
+            variable_end_string=r'}'
+        )
 
     def submit(self, job):
         """
@@ -274,9 +282,12 @@ class Scheduler(object):
         logger.debug("@Scheduler - generate scripts")
         for _path, _dirs, _files in os.walk(_script_dir):
             # Relative paths for subdirectories
-            _sub_dir = re.sub("^%s" % _script_dir, '', _path)
+            # that is not look well to be honest, besides that it doesn't work on windows ;)
+            #_sub_dir = re.sub("^%s" % _script_dir, '', _path)
+            # that works better
+            _sub_dir = os.path.relpath(_path, _script_dir)
             logger.debug("@Scheduler - Sub dir: %s", _sub_dir)
-            if _sub_dir:
+            if _sub_dir != '.':
                 # Remove starting /
                 _sub_dir = _sub_dir[1:]
                 _out_dir = os.path.join(_work_dir, _sub_dir)
@@ -286,6 +297,7 @@ class Scheduler(object):
             # Create subdirectories in output dir
             for _dir in _dirs:
                 _name = os.path.join(_out_dir, _dir)
+                print _name
                 try:
                     os.mkdir(_name)
                 except:
@@ -308,22 +320,28 @@ class Scheduler(object):
                 try:
                     # Open input template script and output file
                     _fin = open(_fin_name, 'r')
+                    # TODO handle subdir
+                    print os.path.join(job.status.service, _file)
+                    # template = self.template_env.get_template(os.path.join(job.status.service, _file))
+                    template = Template(_fin.read())
+                    print template.render(job.data.data)
                     _fou = open(_fou_name, 'w')
 
                     # Loop through input lines and perform substitutions using
                     # string.Template module.
-                    for _line in _fin:
-                        # REGEXPS
-                        _t = Services.CTemplate(_line)
-                        _line = _t.substitute(job.data.data)
-                        _fou.write(_line)
+
+                    # for _line in _fin:
+                    #     # REGEXPS
+                    #     _t = Services.CTemplate(_line)
+                    #     _line = _t.substitute(job.data.data)
+                    #     _fou.write(_line)
                     # Close files
-                    _fin.close()
+                    # _fin.close()
                     _fou.close()
                     # Copy file permisions
                     _st = os.stat(_fin_name)
                     os.chmod(_fou_name, _st.st_mode)
-                except:
+                except IOError:
                     job.die(
                         "@Scheduler - Scripts creation failed for job: %s." %
                         job.id(), exc_info=True
@@ -433,7 +451,7 @@ class PbsScheduler(Scheduler):
         try:
             _session = Jobs.StateManager.new_session()
             _job_count = Jobs.StateManager.get_job_count(scheduler=self.name,
-                    session=_session)
+                                                         session=_session)
             _session.close()
         except:
             logger.error("@PBS - Unable to connect to DB.", exc_info=True)
@@ -459,7 +477,7 @@ class PbsScheduler(Scheduler):
             # @TODO
             # Implementation of dedicated users for each service
             # - The apprunner user currently does not allow to log in via ssh
-            #  - either this limitation is lifted or the server will be run as
+            # - either this limitation is lifted or the server will be run as
             #    another user that is allowed to perform "sudo su apprunner"
             #  - to execute sudo su a TTY is required
             #  - this can be cirumvented using "ssh -t -t"
@@ -483,8 +501,8 @@ class PbsScheduler(Scheduler):
             #
             # _user = self.jm.services[job.service].config['username']
             # _comm = "/usr/bin/qsub -q %s -d %s -j oe -o %s " \
-                    # "-l epilogue=epilogue.sh %s" % \
-                    # (_queue, _work_dir, _output_log, _run_script)
+            # "-l epilogue=epilogue.sh %s" % \
+            # (_queue, _work_dir, _output_log, _run_script)
             # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
             # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
             _opts = ['/usr/bin/qsub', '-q', _queue, '-d', _work_dir, '-j',
@@ -512,7 +530,7 @@ class PbsScheduler(Scheduler):
         # @TODO Do I need DB session here???
         # Store the PBS job ID
         job.scheduler = Jobs.SchedulerQueue(
-                scheduler=self.name, id=_pbs_id, queue=_queue)
+            scheduler=self.name, id=_pbs_id, queue=_queue)
         # Reduce memory footprint
         job.compact()
 
@@ -585,7 +603,7 @@ class PbsScheduler(Scheduler):
                 _exit_code = 0
                 _state = _job_states[_pbs_id]
                 logger.log(VERBOSE, "@PBS - Current job state: '%s' (%s)",
-                        _state[0], _job.id())
+                           _state[0], _job.id())
                 # Job has finished. Check the exit code.
                 if _state[0] == 'C':
                     _new_state = 'done'
@@ -662,7 +680,7 @@ class PbsScheduler(Scheduler):
         # Check return code. If qdel was not killed by signal Popen will
         # not rise an exception
         # @TODO handle temporary communication timeouts with pbs server
-        if _proc.returncode == 170: # Job in wrong state (e.g. exiting)
+        if _proc.returncode == 170:  # Job in wrong state (e.g. exiting)
             logger.debug("@PBS - Wait with job kill: /usr/bin/qdel "
                          "returned 170 exit code (%s)", _output)
             raise CisError("PBS qdel wrong job state")
@@ -723,7 +741,7 @@ class SshScheduler(Scheduler):
         try:
             _session = Jobs.StateManager.new_session()
             _job_count = Jobs.StateManager.get_job_count(scheduler=self.name,
-                    session=_session)
+                                                         session=_session)
             _session.close()
         except:
             logger.error("@SSH - Unable to connect to DB.", exc_info=True)
@@ -804,14 +822,14 @@ class SshScheduler(Scheduler):
                 try:
                     # Run shtat
                     logger.log(VERBOSE, "@SSH - Check jobs state for user %s @ %s",
-                                 _usr, _queue)
+                               _usr, _queue)
                     _shstat = os.path.join(
                         os.path.dirname(conf.daemon_path_installdir),
                         "Scripts"
                     )
                     _shstat = os.path.join(_shstat, "shstat")
                     _ssh = self.__get_ssh_connection(_queue, _usr)
-                    _opts = [_shstat,]
+                    _opts = [_shstat, ]
                     logger.log(VERBOSE, "@SSH - Running command: %s", _opts)
                     _result = _ssh.run(_opts, allow_error=True)
                     _output = _result.output
@@ -939,19 +957,19 @@ class SshScheduler(Scheduler):
         else:
             try:
                 logger.log(VERBOSE, "Create new SSH connection.")
-                _ssh = spur.SshShell( # Assume default private key is valid
-                        hostname=host_name,
-                        username=user_name,
-                        # Workaround for paramiko not understanding host ecdsa keys.
-                        # @TODO If possible disable such keys on sshd at host and
-                        # remove this from production code.
-                        missing_host_key=spur.ssh.MissingHostKey.accept,
-                        # Hack to speedup connection setup - use a minimal known_hosts file - requires a patch for spur
-                        known_hosts_file=conf.ssh_known_hosts
-                        )
+                _ssh = spur.SshShell(  # Assume default private key is valid
+                                       hostname=host_name,
+                                       username=user_name,
+                                       # Workaround for paramiko not understanding host ecdsa keys.
+                                       # @TODO If possible disable such keys on sshd at host and
+                                       # remove this from production code.
+                                       missing_host_key=spur.ssh.MissingHostKey.accept,
+                                       # Hack to speedup connection setup - use a minimal known_hosts file - requires a patch for spur
+                                       known_hosts_file=conf.ssh_known_hosts
+                )
                 self.hosts[_login] = _ssh
                 # Establish the connection
-                _comm = ["/bin/hostname",]
+                _comm = ["/bin/hostname", ]
                 _ssh.run(_comm)
             finally:
                 logger.log(VERBOSE, "SSH connection ready.")

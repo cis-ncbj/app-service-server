@@ -1,8 +1,8 @@
 # Test suite for Services module
 
-from Services import Validator, Service, conf, ServiceStore
+from Services import Validator, Service, conf, ServiceStore, ValidatorError
 from Jobs import Job
-from nose.tools import eq_, ok_
+from nose.tools import eq_, ok_, raises
 import os
 
 
@@ -11,94 +11,18 @@ def setup_module():
     Some configuration options to adapt environment for testing
     :return:
     """
+    test_assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets')
     # from Config import conf
     # change directory from which job data are loaded
-    conf.gate_path_jobs = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assests')
-    # add test service to services list
-    ServiceStore['test'] = Service('test', dict(
-        config={},
-        sets={},
-        variables=dict(
-            test_float=dict(
-                type="float",
-                default=2.3,
-                values=[0, 100]
-            ),
-            test_float_array=dict(
-                type="float_array",
-                default=[2.3, 3.9],
-                values=[4, 0, 100]
-            ),
-            test_date=dict(
-                type="datetime",
-                default="20150115 173000",
-                values="%Y%m%d %H%M%S"
-            ),
-            test_object=dict(
-                type="object",
-                default=dict(
-                    A=1,
-                    B=[2, 3, 4]
-                ),
-                values=dict(
-                    A=dict(
-                        type="int",
-                        default=1,
-                        values=[0, 1000]
-                    ),
-                    B=dict(
-                        type="int_array",
-                        default=[2, 3, 4],
-                        values=[3, 0, 10000]),
-                    C=dict(
-                        type="datetime",
-                        default="20151115 112000",
-                        values="%Y%m%d %H%M%S"
-                    )
-                )
-            ),
-            test_object_array=dict(
-                type="object_array",
-                default=[],
-                values=[10, dict(
-                    K=dict(
-                        type="float",
-                        default=1.2,
-                        values=[0, 1000]
-                    ),
-                    L=dict(
-                        type="datetime",
-                        default="20011119 103010",
-                        values="%Y%m%d %H%M%S"
-                    )
-                )]
-            )
-        )
-    ))
-    ServiceStore['default'] = Service('test', dict(
-        config={},
-        sets={},
-        variables={
-            "CIS_SCHEDULER": {
-                "type": "string",
-                "default": "ssh",
-                "values": ["pbs", "ssh"]
-            },
-            "CIS_QUEUE": {
-                "type": "string",
-                "default": "test_slc6",
-                "values": ["short", "long", "test_slc6"]
-            },
-            "CIS_SSH_HOST": {
-                "type": "string",
-                "default": "localhost",
-                "values": ["localhost"]
-            }
-        }
-    ))
+    conf.gate_path_jobs = os.path.join(test_assets, 'payloads')
+    # add test services to services list
+    for _service in ['test', 'default']:
+        with open(os.path.join(test_assets, 'services', _service+'.json')) as _f:
+            ServiceStore[_service] = Service(_service, conf.json_load(_f))
 
 
 class TestValidator:
+
     @classmethod
     def setup_class(cls):
         cls.valid_job = Job('test_valid_job.json')
@@ -106,7 +30,7 @@ class TestValidator:
 
     def test_validate(self):
         """
-        Validator.validate
+        Validator.validate for proper input
         :return:
         """
         # job = Job('test_valid_job.json')
@@ -129,6 +53,25 @@ class TestValidator:
         }
         for _k, _v in valid_result.items():
             eq_(_v, result[_k], u'Checking key {0:s}'.format(_k))
+
+        # invalid input
+
+    @raises(ValidatorError)
+    def test_validate_invalid_object(self):
+        """
+        Validator.validate for invalid 'object' variable
+        :return:
+        """
+        Validator.validate(Job('test_invalid_object.json'))
+    @raises(ValidatorError)
+    def test_validate_invalid_object_array(self):
+        """
+        Validator.validate for invalid 'object_array' variable
+        :return:
+        """
+        Validator.validate(Job('test_invalid_object_array.json'))
+
+    # TODO more tests with different kinds of invalid payloads
 
     def test_validate_value_date(self):
         """

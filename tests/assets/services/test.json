@@ -1,0 +1,61 @@
+{
+  "config": {},
+  "sets": {},
+  "variables": {
+    "test_float": {
+      "type": "float",
+      "default": 2.3,
+      "values": [0, 100]
+    },
+    "test_float_array": {
+      "type": "float_array",
+      "default": [2.3,3.9],
+      "values": [4,0,100]
+    },
+    "test_date": {
+      "type": "datetime",
+      "default": "20150115 173000",
+      "values": "%Y%m%d %H%M%S"
+    },
+    "test_object": {
+      "type": "object",
+      "default": {
+        "A": 1,
+        "B": [2,3,4]
+      },
+      "values": {
+        "A": {
+          "type": "int",
+          "default": 1,
+          "values": [0,1000]
+        },
+        "B": {
+          "type": "int_array",
+          "default": [2, 3, 4],
+          "values": [3, 0, 10000]
+        },
+        "C": {
+          "type": "datetime",
+          "default": "20151115 112000",
+          "values": "%Y%m%d %H%M%S"
+        }
+      }
+    },
+    "test_object_array": {
+      "type": "object_array",
+      "default": [],
+      "values": [10,{
+          "K": {
+            "type": "float",
+            "default": 1.2,
+            "values": [0,1000]
+          },
+          "L": {
+            "type": "datetime",
+            "default": "20011119 103010",
+            "values": "%Y%m%d %H%M%S"
+          }
+        }]
+    }
+  }
+}
