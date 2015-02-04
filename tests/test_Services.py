@@ -26,8 +26,8 @@ def setup_module():
             ),
             test_float_array=dict(
                 type="float_array",
-                default=[2.3,3.9],
-                values=[4,0, 100]
+                default=[2.3, 3.9],
+                values=[4, 0, 100]
             ),
             test_date=dict(
                 type="datetime",
@@ -60,7 +60,7 @@ def setup_module():
             test_object_array=dict(
                 type="object_array",
                 default=[],
-                values=[10,dict(
+                values=[10, dict(
                     K=dict(
                         type="float",
                         default=1.2,
@@ -78,22 +78,22 @@ def setup_module():
     ServiceStore['default'] = Service('test', dict(
         config={},
         sets={},
-        variables = {
-        "CIS_SCHEDULER" : {
-            "type" : "string",
-            "default" : "ssh",
-            "values" : ["pbs", "ssh"]
-        },
-        "CIS_QUEUE" : {
-            "type" : "string",
-            "default" : "test_slc6",
-            "values" : ["short", "long", "test_slc6"]
-        },
-        "CIS_SSH_HOST" : {
-            "type" : "string",
-            "default" : "localhost",
-            "values" : ["localhost"]
-        }
+        variables={
+            "CIS_SCHEDULER": {
+                "type": "string",
+                "default": "ssh",
+                "values": ["pbs", "ssh"]
+            },
+            "CIS_QUEUE": {
+                "type": "string",
+                "default": "test_slc6",
+                "values": ["short", "long", "test_slc6"]
+            },
+            "CIS_SSH_HOST": {
+                "type": "string",
+                "default": "localhost",
+                "values": ["localhost"]
+            }
         }
     ))
 
@@ -112,8 +112,23 @@ class TestValidator:
         # job = Job('test_valid_job.json')
         # print self.valid_job.id()
         Validator.validate(self.valid_job)
-        print self.valid_job.data.data
-        eq_(1, 1, "OK")
+
+        result = self.valid_job.data.data
+        valid_result = {
+            "test_date": "20150317 135200",
+            "test_object": {
+                "A": 34,
+                "B": [21, 30, 41],
+                "C": "20151115 112000"
+            },
+            "test_float": 2.3,
+            "test_float_array": [2.1, 44.5, 1.1],
+            "test_object_array": [{"K": 3.3, "L": "20011119 103010"},
+                                  {"K": 1.2, "L": "20110109 003010"},
+                                  {"K": 88.11, "L": "20160522 063510"}]
+        }
+        for _k, _v in valid_result.items():
+            eq_(_v, result[_k], u'Checking key {0:s}'.format(_k))
 
     def test_validate_value_date(self):
         """
@@ -147,20 +162,20 @@ class TestValidator:
         """
         var_name = 'test_float_array'
         # proper value
-        ok_(Validator.validate_value(var_name, [0.1,55.3,2.3], self.service),
+        ok_(Validator.validate_value(var_name, [0.1, 55.3, 2.3], self.service),
             "Basic value - array")
-        ok_(Validator.validate_value(var_name, (0.1,55.3,2.3), self.service),
+        ok_(Validator.validate_value(var_name, (0.1, 55.3, 2.3), self.service),
             "Basic value - tuple")
 
         # failed input
         # failed up to commit #106aa0669
         ok_(not Validator.validate_value(var_name, 0.1, self.service),
             "Number instead of array")
-        ok_(not Validator.validate_value(var_name, (0.1,55.3,2.3,33.21,5.1,7.5), self.service),
+        ok_(not Validator.validate_value(var_name, (0.1, 55.3, 2.3, 33.21, 5.1, 7.5), self.service),
             "Too many values")
-        ok_(not Validator.validate_value(var_name, (599999999.1,7.5), self.service),
+        ok_(not Validator.validate_value(var_name, (599999999.1, 7.5), self.service),
             "One value out of bounds")
-        ok_(not Validator.validate_value(var_name, (5.1,-7.5), self.service),
+        ok_(not Validator.validate_value(var_name, (5.1, -7.5), self.service),
             "One value out of bounds")
 
     def test_validate_value_float(self):
@@ -190,20 +205,20 @@ class TestValidator:
         var_name = 'test_object'
         # proper values
         ok_(Validator.validate_value(var_name,
-                                     dict(A=2,B=[4,5,34]),
-                                     self.service),"Basic object")
-        ok_(Validator.validate_value(var_name,{},
-                                     self.service),"Empty object")
+                                     dict(A=2, B=[4, 5, 34]),
+                                     self.service), "Basic object")
+        ok_(Validator.validate_value(var_name, {},
+                                     self.service), "Empty object")
 
         # failed input
-        ok_(not Validator.validate_value(var_name,dict(C='bla'),
-                                     self.service),"Unsupported variable")
-        ok_(not Validator.validate_value(var_name,[],
-                                     self.service),"Array instead of dict")
-        ok_(not Validator.validate_value(var_name,dict(A=99999999),
-                                     self.service),"Not valid variable")
-        ok_(not Validator.validate_value(var_name,dict(B=[1,2,3,4,5,4]),
-                                     self.service),"Not valid variable")
+        ok_(not Validator.validate_value(var_name, dict(C='bla'),
+                                         self.service), "Unsupported variable")
+        ok_(not Validator.validate_value(var_name, [],
+                                         self.service), "Array instead of dict")
+        ok_(not Validator.validate_value(var_name, dict(A=99999999),
+                                         self.service), "Not valid variable")
+        ok_(not Validator.validate_value(var_name, dict(B=[1, 2, 3, 4, 5, 4]),
+                                         self.service), "Not valid variable")
 
         ServiceStore['test'].variables['too_nested'] = dict(
             type="object",
@@ -218,7 +233,7 @@ class TestValidator:
                     type="object",
                     default={},
                     values=dict(
-                         Z=dict(
+                        Z=dict(
                             type="int",
                             default=3,
                             values=[0, 12]
@@ -227,12 +242,12 @@ class TestValidator:
                 )
             )
         )
-        ok_(not Validator.validate_value('too_nested',dict(
+        ok_(not Validator.validate_value('too_nested', dict(
             T=1,
             nested=dict(
                 Z=5
             )),
-            self.service),"Too nested object")
+                                         self.service), "Too nested object")
 
     def test_validate_value_object_array(self):
         """
@@ -240,25 +255,25 @@ class TestValidator:
         :return:
         """
         var_name = 'test_object_array'
-        #proper values
+        # proper values
         ok_(Validator.validate_value(var_name,
-                                     [dict(K=2,L="21011119 133010"),
-                                      dict(K=0.2,L="20050119 033010"),
-                                      dict(K=20.1,L="22011116 103110")],
-                                     self.service),"Basic object")
-        ok_(Validator.validate_value(var_name,[{},{}],
-                                     self.service),"Empty objects")
-        ok_(Validator.validate_value(var_name,[{}, dict(K=2,L="21011119 133010")],
-                                     self.service),"Mixed empty and full objects")
+                                     [dict(K=2, L="21011119 133010"),
+                                      dict(K=0.2, L="20050119 033010"),
+                                      dict(K=20.1, L="22011116 103110")],
+                                     self.service), "Basic object")
+        ok_(Validator.validate_value(var_name, [{}, {}],
+                                     self.service), "Empty objects")
+        ok_(Validator.validate_value(var_name, [{}, dict(K=2, L="21011119 133010")],
+                                     self.service), "Mixed empty and full objects")
 
-        #failed input
-        ok_(not Validator.validate_value(var_name,{'ss':1},
-                                     self.service),"Object instead of array")
+        # failed input
+        ok_(not Validator.validate_value(var_name, {'ss': 1},
+                                         self.service), "Object instead of array")
         ok_(not Validator.validate_value(var_name,
-                                     [dict(K=2,L="21011119 133010"),
-                                      dict(K=0.2,L="20050119 433010"), # hour out of bounds
-                                      dict(K=20.1,L="22011116 103110")],
-                                     self.service),"One failed value in one object in array")
+                                         [dict(K=2, L="21011119 133010"),
+                                          dict(K=0.2, L="20050119 433010"),  # hour out of bounds
+                                          dict(K=20.1, L="22011116 103110")],
+                                         self.service), "One failed value in one object in array")
 
     def test_validate_value_unknown_type(self):
         """

@@ -5,6 +5,7 @@
 # Plugins
 # http://yapsy.sourceforge.net/
 # http://stackoverflow.com/questions/5333128/yapsy-minimal-example
+from functools import partial
 
 import os
 import json
@@ -208,6 +209,12 @@ class Validator(object):
                         (_k, _v)
                     )
                 else:
+                    if _service.variables[_k]['type'] == 'object':
+                        _v = self.set_object_variable(_v, _service.variables[_k]['values'])
+                    elif _service.variables[_k]['type'] == 'object_array':
+                        _v = map(partial(self.set_object_variable,
+                                         variable_definition=_service.variables[_k]['values'][1]),
+                                 _v)
                     _variables[_k] = _v
                     logger.debug(
                         "@Validator - Value passed validation: %s - %s" %
@@ -265,6 +272,19 @@ class Validator(object):
         job.data = Jobs.JobData(data=_variables)
         logger.log(VERBOSE, '@Validator - Validated input data:')
         logger.log(VERBOSE, _variables)
+
+    @staticmethod
+    def set_object_variable(_v, variable_definition):
+        """
+
+        :param _v:
+        :param variable_definition:
+        :return:
+        """
+        for key in variable_definition.keys():
+            if key not in _v:
+                _v[key] = variable_definition[key]['default']
+        return _v
 
     def validate_value(self, key, value, service, nesting_level=0):
         """
