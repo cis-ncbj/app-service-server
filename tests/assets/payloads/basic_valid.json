@@ -4,7 +4,7 @@
   "input" : {
       "SLEEP": 30,
       "Int": 100,
-      "1Float": -20.1,
-      "2Float": 99.2
+      "_1Float": -20.1,
+      "_2Float": 99.2
   }
 }

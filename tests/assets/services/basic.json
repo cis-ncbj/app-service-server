@@ -20,7 +20,7 @@
         ]
       },
       // Nominator
-      "1Float": {
+      "_1Float": {
         "type": "float",
         "default": 1.0,
         "values": [
@@ -29,7 +29,7 @@
         ]
       },
       // Denominator
-      "2Float": {
+      "_2Float": {
         "type": "float",
         "default": 20.99,
         "values": [

@@ -61,7 +61,9 @@ class Scheduler(object):
         self.template_env = Environment(
             loader=FileSystemLoader(conf.service_path_data),
             variable_start_string=r'@@{',
-            variable_end_string=r'}'
+            variable_end_string=r'}',
+            trim_blocks=True,
+            lstrip_blocks=True
         )
 
     def submit(self, job):
@@ -289,7 +291,7 @@ class Scheduler(object):
             logger.debug("@Scheduler - Sub dir: %s", _sub_dir)
             if _sub_dir != '.':
                 # Remove starting /
-                _sub_dir = _sub_dir[1:]
+               # _sub_dir = _sub_dir[1:]
                 _out_dir = os.path.join(_work_dir, _sub_dir)
             else:
                 _out_dir = _work_dir
@@ -297,7 +299,6 @@ class Scheduler(object):
             # Create subdirectories in output dir
             for _dir in _dirs:
                 _name = os.path.join(_out_dir, _dir)
-                print _name
                 try:
                     os.mkdir(_name)
                 except:
@@ -319,29 +320,17 @@ class Scheduler(object):
                 _fou_name = os.path.join(_out_dir, _file)
                 try:
                     # Open input template script and output file
-                    _fin = open(_fin_name, 'r')
                     # TODO handle subdir
-                    print os.path.join(job.status.service, _file)
-                    # template = self.template_env.get_template(os.path.join(job.status.service, _file))
-                    template = Template(_fin.read())
-                    print template.render(job.data.data)
+                    # print os.path.join(conf.service_path_data,job.status.service, _file)
+                    template = self.template_env.get_template(job.status.service+'/'+_sub_dir+'/'+_file)
                     _fou = open(_fou_name, 'w')
 
-                    # Loop through input lines and perform substitutions using
-                    # string.Template module.
-
-                    # for _line in _fin:
-                    #     # REGEXPS
-                    #     _t = Services.CTemplate(_line)
-                    #     _line = _t.substitute(job.data.data)
-                    #     _fou.write(_line)
-                    # Close files
-                    # _fin.close()
+                    _fou.write(template.render(job.data.data))
                     _fou.close()
                     # Copy file permisions
                     _st = os.stat(_fin_name)
                     os.chmod(_fou_name, _st.st_mode)
-                except IOError:
+                except TypeError:
                     job.die(
                         "@Scheduler - Scripts creation failed for job: %s." %
                         job.id(), exc_info=True

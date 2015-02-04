@@ -1,6 +1,6 @@
 #!/bin/sh
 one @@{SLEEP}
 @@{Int} two
-nanana @@{1Float} nanana
-@@{2Float}
+nanana @@{ _1Float } nanana
+@@{ _2Float }
 @@{FloatArray}
