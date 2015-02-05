@@ -1,10 +1,12 @@
 # simple script that tests how service files are generated
+import logging
 
 from Schedulers import conf, Scheduler
 from Jobs import Job
 import os
 from Services import ServiceStore, Service, Validator
 
+logger = logging.getLogger(__name__)
 
 def prepare_environment():
     _services_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Services')
@@ -21,7 +23,7 @@ if __name__ == "__main__":
     filename = os.path.basename(test_payload)
     test_dir = os.path.dirname(os.path.realpath(test_payload))
     conf.gate_path_jobs = test_dir
-
+    conf.log_level = "DEBUG"
     print test_dir
     scheduler = Scheduler()
     work_dir = os.path.join(test_dir, 'work')

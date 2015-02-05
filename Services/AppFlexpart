@@ -158,7 +158,7 @@
         "weight":{
           "type":"float",
           "default": 29.00,
-          "values" : [0.1,999.99]
+          "values" : [-9.99,999.99]
         },
         "oh_react":{
           "type":"float",
