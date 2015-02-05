@@ -11,9 +11,9 @@
     10               IFINE  (int)      decrease of time step for vertical motion by factor ifine            !ustawione na stale
     @@{output_type}               
     0                IPOUT             particle dump: 0 no, 1 every output interval, 2 only at end          !ustawione na stale
-    0                LSUBGRID          subgrid terrain effect parameterization: 1 yes, 0 no                 !ustawione na stale
+    3                LSUBGRID          subgrid terrain effect parameterization: 1 yes, 0 no                 !ustawione na stale
     0                LCONVECTION       convection: 3 yes, 0 no                                              !ustawione na stale
-    3600.            DT_CONV  (real)   time interval to call convection, seconds                            !ustawione na stale
+    1800.            DT_CONV  (real)   time interval to call convection, seconds                            !ustawione na stale
     1                LAGESPECTRA       age spectra: 1 yes, 0 no                                             !ustawione na stale
     0                IPIN              continue simulation with dumped particle data: 1 yes, 0 no           !ustawione na stale
     0                IFLUX             calculate fluxes: 1 yes, 0 no                                        !ustawione na stale
@@ -26,12 +26,12 @@
     1                TURB_OPTION       0=no turbulence; 1=diagnosed as in flexpart_ecmwf; 2 and 3=from tke. !ustawione na stale
     0                CBL SCHEME        0=no, 1=yes. works if TURB_OPTION=1                                  !ustawione na stale
     1                SFC_OPTION        0=default computation of u*, hflux, pblh, 1=from wrf                 !ustawione na stale
-    0                WIND_OPTION       0=snapshot winds, 1=mean winds,2=snapshot eta-dot,-1=w based on divergence
+    1                WIND_OPTION       0=snapshot winds, 1=mean winds,2=snapshot eta-dot,-1=w based on divergence
     1                TIME_OPTION       1=correction of time validity for time-average wind,  0=no need      !ustawione na stale
-    0                OUTGRID_COORD     0=wrf grid(meters), 1=regular lat/lon grid                           !ustawione na stale
+    1                OUTGRID_COORD     0=wrf grid(meters), 1=regular lat/lon grid                           !ustawione na stale
     1                RELEASE_COORD     0=wrf grid(meters), 1=regular lat/lon grid                           !ustawione na stale
-    2                IOUTTYPE          0=default binary, 1=ascii (for particle dump only),2=netcdf          !ustawione na stale
-    73               NCTIMEREC (int)   Time frames per output file, only used for netcdf                    !ustawione na stale
+    0                IOUTTYPE          0=default binary, 1=ascii (for particle dump only),2=netcdf          !ustawione na stale
+    100               NCTIMEREC (int)   Time frames per output file, only used for netcdf                    !ustawione na stale
     0                VERBOSE           VERBOSE MODE,0=minimum, 100=maximum                                  !ustawione na stale
 =====================FORMER AGECLASESS FILE==================
     @@{age_classes|length}                NAGECLASS        number of age classes
@@ -39,13 +39,13 @@
     @@{age}             SSSSSS  (int)    age class in SSSSS seconds
 {% endfor %}
 =====================FORMER OUTGRID FILE=====================
-   -123.00            OUTLONLEFT      geograhical longitude of lower left corner of output grid             !ustawione na stale
-    38.0              OUTLATLOWER     geographical latitude of lower left corner of output grid             !ustawione na stale
-    24               NUMXGRID        number of grid points in x direction (= # of cells )                   !ustawione na stale
-    28               NUMYGRID        number of grid points in y direction (= # of cells )                   !ustawione na stale
+    6.055511            OUTLONLEFT      geograhical longitude of lower left corner of output grid             !ustawione na stale
+    40.77761               OUTLATLOWER     geographical latitude of lower left corner of output grid             !ustawione na stale
+    239               NUMXGRID        number of grid points in x direction (= # of cells )                   !ustawione na stale
+    239               NUMYGRID        number of grid points in y direction (= # of cells )                   !ustawione na stale
     0                OUTGRIDDEF      outgrid defined 0=using grid distance, 1=upperright corner coordinate  !ustawione na stale
-    0.1250           DXOUTLON        grid distance in x direction or upper right corner of output grid      !ustawione na stale
-    0.1250           DYOUTLON        grid distance in y direction or upper right corner of output grid      !ustawione na stale
+    9000.0           DXOUTLON        grid distance in x direction or upper right corner of output grid      !ustawione na stale
+    9000.0           DYOUTLON        grid distance in y direction or upper right corner of output grid      !ustawione na stale
     @@{vertical_levels|length}                NUMZGRID
 {% for z_level in vertical_levels %}
     @@{z_level}           LEVEL           height of level (upper boundary)
@@ -57,10 +57,8 @@
    @@{species|length}               NUMTABLE
 XXXX|NAME    |decaytime |wetscava  |wetsb|drydif|dryhenry|drya|partrho  |parmean|partsig|dryvelo|weight |
 {% for spc in species %}
-    @@{spc.name}    @@{spc.decaytime}   @@{spc.wetscava}
+    @@{spc.name}    @@{spc.decaytime}   @@{spc.wetscava}   @@{ spc.wetsb if spc.wetsb>0.0 else ' ' }   @@{spc.drydif}   @@{ spc.dryhenry if spc.dryhenry>0.0 else ' ' }   @@{ spc.drya if spc.drya>=0.0 else ' ' }    @@{'%.1E'|format(spc.partrho)}    @@{ spc.partmean if spc.partmean>0.0 else ' ' }    @@{ spc.partsig if spc.partsig>0.0 else ' ' }    @@{spc.dryvelo}    @@{spc.weight}
 {% endfor %}
-    AIRTRACER     -999.9   -9.9E-09         -9.9                 -9.9E09                   -9.99   29.00    
-    Cs-137        -999.9    1.0E-04  0.80   -9.9                  2.5E03  6.0E-7  3.0E-1   -9.99   -9.99    
 =====================FORMER RELEEASES FILE===================
    @@{species|length}                NSPEC
    0                EMITVAR

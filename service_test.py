@@ -2,7 +2,6 @@
 
 from Schedulers import conf, Scheduler
 from Jobs import Job
-from nose.tools import eq_, ok_, raises
 import os
 from Services import ServiceStore, Service, Validator
 
@@ -18,7 +17,7 @@ def prepare_environment():
 
 if __name__ == "__main__":
     prepare_environment()
-    test_payload = os.path.join("C:\Users\gomulskik\Desktop\out_test\AppFlexpart_test.json")
+    test_payload = os.path.join("C:\\Users\\Krzysztof Gomulski\\Desktop\\test\\AppFlexpart_test.json")
     filename = os.path.basename(test_payload)
     test_dir = os.path.dirname(os.path.realpath(test_payload))
     conf.gate_path_jobs = test_dir
