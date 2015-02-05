@@ -1,0 +1,86 @@
+=====================FORMER COMMAND FILE=====================
+    1                                                                                     
+    @@{start_case}
+    @@{end_case}
+    @@{output_period}             SSSSS  (int) 
+    @@{output_period}             SSSSS  (int)
+    180              SSSSS  (int)      sampling rate of output (in SSSSS seconds)         !ustawione na stale
+    999999999        SSSSS  (int)      time constant for particle splitting (in seconds)  !ustawione na stale
+    180              SSSSS  (int)      synchronisation interval of flexpart (in seconds)  !ustawione na stale
+    10.              CTL    (real)     factor by which time step must be smaller than tl  !ustawione na stale
+    10               IFINE  (int)      decrease of time step for vertical motion by factor ifine            !ustawione na stale
+    @@{output_type}               
+    0                IPOUT             particle dump: 0 no, 1 every output interval, 2 only at end          !ustawione na stale
+    0                LSUBGRID          subgrid terrain effect parameterization: 1 yes, 0 no                 !ustawione na stale
+    0                LCONVECTION       convection: 3 yes, 0 no                                              !ustawione na stale
+    3600.            DT_CONV  (real)   time interval to call convection, seconds                            !ustawione na stale
+    1                LAGESPECTRA       age spectra: 1 yes, 0 no                                             !ustawione na stale
+    0                IPIN              continue simulation with dumped particle data: 1 yes, 0 no           !ustawione na stale
+    0                IFLUX             calculate fluxes: 1 yes, 0 no                                        !ustawione na stale
+    0                IOUTPUTFOREACHREL CREATE AN OUPUT FILE FOR EACH RELEASE LOCATION: 1 YES, 0 NO          !ustawione na stale
+    0                MDOMAINFILL       domain-filling trajectory option: 1 yes, 0 no, 2 strat. o3 tracer    !ustawione na stale
+    1                IND_SOURCE        1=mass unit , 2=mass mixing ratio unit                               !ustawione na stale
+    1                IND_RECEPTOR      1=mass unit , 2=mass mixing ratio unit                               !ustawione na stale
+    0                NESTED_OUTPUT     shall nested output be used? 1 yes, 0 no                             !ustawione na stale
+    0                LINIT_COND   INITIAL COND. FOR BW RUNS: 0=NO,1=MASS UNIT,2=MASS MIXING RATIO UNIT      !ustawione na stale
+    1                TURB_OPTION       0=no turbulence; 1=diagnosed as in flexpart_ecmwf; 2 and 3=from tke. !ustawione na stale
+    0                CBL SCHEME        0=no, 1=yes. works if TURB_OPTION=1                                  !ustawione na stale
+    1                SFC_OPTION        0=default computation of u*, hflux, pblh, 1=from wrf                 !ustawione na stale
+    0                WIND_OPTION       0=snapshot winds, 1=mean winds,2=snapshot eta-dot,-1=w based on divergence
+    1                TIME_OPTION       1=correction of time validity for time-average wind,  0=no need      !ustawione na stale
+    0                OUTGRID_COORD     0=wrf grid(meters), 1=regular lat/lon grid                           !ustawione na stale
+    1                RELEASE_COORD     0=wrf grid(meters), 1=regular lat/lon grid                           !ustawione na stale
+    2                IOUTTYPE          0=default binary, 1=ascii (for particle dump only),2=netcdf          !ustawione na stale
+    73               NCTIMEREC (int)   Time frames per output file, only used for netcdf                    !ustawione na stale
+    0                VERBOSE           VERBOSE MODE,0=minimum, 100=maximum                                  !ustawione na stale
+=====================FORMER AGECLASESS FILE==================
+    @@{age_classes|length}                NAGECLASS        number of age classes
+{% for age in age_classes %}
+    @@{age}             SSSSSS  (int)    age class in SSSSS seconds
+{% endfor %}
+=====================FORMER OUTGRID FILE=====================
+   -123.00            OUTLONLEFT      geograhical longitude of lower left corner of output grid             !ustawione na stale
+    38.0              OUTLATLOWER     geographical latitude of lower left corner of output grid             !ustawione na stale
+    24               NUMXGRID        number of grid points in x direction (= # of cells )                   !ustawione na stale
+    28               NUMYGRID        number of grid points in y direction (= # of cells )                   !ustawione na stale
+    0                OUTGRIDDEF      outgrid defined 0=using grid distance, 1=upperright corner coordinate  !ustawione na stale
+    0.1250           DXOUTLON        grid distance in x direction or upper right corner of output grid      !ustawione na stale
+    0.1250           DYOUTLON        grid distance in y direction or upper right corner of output grid      !ustawione na stale
+    @@{vertical_levels|length}                NUMZGRID
+{% for z_level in vertical_levels %}
+    @@{z_level}           LEVEL           height of level (upper boundary)
+{% endfor %}
+    1000-20000m
+=====================FORMER RECEPTOR FILE====================
+    0                NUMRECEPTOR     number of receptors                                                    
+=====================FORMER SPECIES FILE=====================
+   @@{species|length}               NUMTABLE
+XXXX|NAME    |decaytime |wetscava  |wetsb|drydif|dryhenry|drya|partrho  |parmean|partsig|dryvelo|weight |
+{% for spc in species %}
+    @@{spc.name}    @@{spc.decaytime}   @@{spc.wetscava}
+{% endfor %}
+    AIRTRACER     -999.9   -9.9E-09         -9.9                 -9.9E09                   -9.99   29.00    
+    Cs-137        -999.9    1.0E-04  0.80   -9.9                  2.5E03  6.0E-7  3.0E-1   -9.99   -9.99    
+=====================FORMER RELEEASES FILE===================
+   @@{species|length}                NSPEC
+   0                EMITVAR
+{% for spc in species %}
+   @@{loop.index0}           LINK
+{% endfor %}
+   @@{emissions|length}                 NUMPOINT
+{% for em in emissions %}
+   @@{em.start}   ID1, IT1
+   @@{em.end}     ID2, IT2
+   @@{em.ll_lon}
+   @@{em.ll_lat}
+   @@{em.ur_lon}
+   @@{em.ur_lat}
+   1
+   @@{em.lz}
+   @@{em.uz}
+   @@{em.npart}
+{% for mass in em.masses%}
+   @@{mass}
+{% endfor %}
+   box@@{loop.index0+1}
+{% endfor %}
