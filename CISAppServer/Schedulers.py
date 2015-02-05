@@ -954,7 +954,8 @@ class SshScheduler(Scheduler):
                                        # remove this from production code.
                                        missing_host_key=spur.ssh.MissingHostKey.accept,
                                        # Hack to speedup connection setup - use a minimal known_hosts file - requires a patch for spur
-                                       known_hosts_file=conf.ssh_known_hosts
+                                       #known_hosts_file=conf.ssh_known_hosts
+                                       # What patch?
                 )
                 self.hosts[_login] = _ssh
                 # Establish the connection

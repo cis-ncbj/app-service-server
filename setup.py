@@ -1,4 +1,4 @@
-from distutils.core import setup
+from setuptools import setup
 
 setup(
     name='CISAppServer',
@@ -14,5 +14,5 @@ setup(
               'yapsy',
               'spur',
               'nose',
-              'jinja2']
+              'jinja2>=2.7']
 )
