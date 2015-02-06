@@ -13,7 +13,7 @@ def get_in_data_file(forecast):
    
 
 def link_in_data_file(forecast):
-    if os.path.isfile(get_in_data_file(forecast)+".nc"):
+    if not os.path.isfile(get_in_data_file(forecast)+".nc"):
          os.symlink( os.path.join(forecast_dir,
                                  forecast.strftime('CIS.%Y%m%d%H'),
                                 'wrfprd',

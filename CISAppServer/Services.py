@@ -506,6 +506,7 @@ class Validator(object):
                                            #service.variables[key],
                                            nesting_level=1):
                     # better to raise error?
+                    print _k,_v
                     logger.error(
                         "@Validator - Variable value not allowed: %s - %s." % (_k, _v))
                     return False

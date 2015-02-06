@@ -11,7 +11,7 @@
     10               IFINE  (int)      decrease of time step for vertical motion by factor ifine            !ustawione na stale
     @@{output_type}               
     0                IPOUT             particle dump: 0 no, 1 every output interval, 2 only at end          !ustawione na stale
-    3                LSUBGRID          subgrid terrain effect parameterization: 1 yes, 0 no                 !ustawione na stale
+    1                LSUBGRID          subgrid terrain effect parameterization: 1 yes, 0 no                 !ustawione na stale
     0                LCONVECTION       convection: 3 yes, 0 no                                              !ustawione na stale
     1800.            DT_CONV  (real)   time interval to call convection, seconds                            !ustawione na stale
     1                LAGESPECTRA       age spectra: 1 yes, 0 no                                             !ustawione na stale
@@ -48,37 +48,48 @@
     9000.0           DYOUTLON        grid distance in y direction or upper right corner of output grid      !ustawione na stale
     @@{vertical_levels|length}                NUMZGRID
 {% for z_level in vertical_levels %}
-    @@{z_level}           LEVEL           height of level (upper boundary)
+@@{"%9s"|format("%.1f"|format(z_level))}           LEVEL           height of level (upper boundary)
 {% endfor %}
-    1000-20000m
 =====================FORMER RECEPTOR FILE====================
     0                NUMRECEPTOR     number of receptors                                                    
 =====================FORMER SPECIES FILE=====================
    @@{species|length}               NUMTABLE
 XXXX|NAME    |decaytime |wetscava  |wetsb|drydif|dryhenry|drya|partrho  |parmean|partsig|dryvelo|weight |
 {% for spc in species %}
-    @@{spc.name}    @@{spc.decaytime}   @@{spc.wetscava}   @@{ spc.wetsb if spc.wetsb>0.0 else ' ' }   @@{spc.drydif}   @@{ spc.dryhenry if spc.dryhenry>0.0 else ' ' }   @@{ spc.drya if spc.drya>=0.0 else ' ' }    @@{'%.1E'|format(spc.partrho)}    @@{ spc.partmean if spc.partmean>0.0 else ' ' }    @@{ spc.partsig if spc.partsig>0.0 else ' ' }    @@{spc.dryvelo}    @@{spc.weight}
+   @@{"%10s %10s %10s %5s %6s %8s %4s %9s %7s %7s %7s %7s"|format(
+                                spc.name,
+                                spc.decaytime,
+                                "%.1e"|format(spc.wetscava),
+                                spc.wetsb if spc.wetsb>0.0 else ' ',
+                                "%.1f"|format(spc.drydif),
+                                spc.dryhenry if spc.dryhenry>0.0 else ' ',
+                                spc.drya if spc.drya>=0.0 else ' ',
+                                spc.partrho,
+                                spc.partmean if spc.partmean>0.0 else ' ',
+                                spc.partsig if spc.partsig>0.0 else ' ',
+                                "%.2f"|format(spc.dryvelo),
+                                spc.weight)}
 {% endfor %}
 =====================FORMER RELEEASES FILE===================
    @@{species|length}                NSPEC
    0                EMITVAR
 {% for spc in species %}
-   @@{loop.index0}           LINK
+   @@{loop.index0+1}           LINK
 {% endfor %}
    @@{emissions|length}                 NUMPOINT
 {% for em in emissions %}
-   @@{em.start}   ID1, IT1
-   @@{em.end}     ID2, IT2
+@@{em.start}   ID1, IT1
+@@{em.end}     ID2, IT2
    @@{em.ll_lon}
    @@{em.ll_lat}
    @@{em.ur_lon}
    @@{em.ur_lat}
    1
-   @@{em.lz}
-   @@{em.uz}
+   @@{"%.1f"|format(em.lz)}
+   @@{"%.1f"|format(em.uz)}
    @@{em.npart}
 {% for mass in em.masses%}
-   @@{mass}
+ @@{"%.2e"|format(mass)}
 {% endfor %}
    box@@{loop.index0+1}
 {% endfor %}

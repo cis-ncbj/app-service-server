@@ -163,8 +163,11 @@ class Scheduler(object):
                                  stat.S_IROTH | stat.S_IXOTH)
                     for _file in _files:
                         _name = os.path.join(_root, _file)
-                        os.chmod(_name, os.stat(_name).st_mode |
+                        try:
+                            os.chmod(_name, os.stat(_name).st_mode |
                                  stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)
+                        except Exception as e:
+                            print e
             except:
                 job.die("@Scheduler - Unable to retrive job output directory %s" %
                         _work_dir, exc_info=True)

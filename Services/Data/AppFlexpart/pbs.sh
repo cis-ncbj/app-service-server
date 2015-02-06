@@ -4,10 +4,10 @@
 #PBS -q i12h
 #PBS -l mem=6GB
 
-setenv LD_LIBRARY_PATH /mnt/opt/tools/slc6/gcc/4.6.3/lib64:/mnt/opt/tools/slc6/gcc/4.6.3/lib:/mnt/opt/tools/slc6/binutils/2.22/lib64
-:/mnt/opt/tools/slc6/binutils/2.22/lib:/mnt/opt/tools/slc6/netcdf/4.3.0/lib
+#setenv LD_LIBRARY_PATH /mnt/opt/tools/slc6/binutils/2.22/lib:/mnt/opt/tools/slc6/netcdf/4.3.0/lib
 
 module load python
+module load netcdf/4.3.0-pgi
 
 cd $PBS_O_WORKDIR
 
@@ -15,8 +15,11 @@ ln -s /mnt/home/mjkorycki/models/slc6/FLEXPART_WRF/src_flexwrf_v3.1/data/IGBP_in
 ln -s /mnt/home/mjkorycki/models/slc6/FLEXPART_WRF/src_flexwrf_v3.1/data/OH_7lev_agl.dat $PBS_O_WORKDIR/OH_7lev_agl.dat
 ln -s /mnt/home/mjkorycki/models/slc6/FLEXPART_WRF/src_flexwrf_v3.1/data/surfdata.t $PBS_O_WORKDIR/surfdata.t
 ln -s /mnt/home/mjkorycki/models/slc6/FLEXPART_WRF/src_flexwrf_v3.1/data/surfdepo.t $PBS_O_WORKDIR/surfdepo.t
+ln -s /mnt/home/mjkorycki/models/slc6/FLEXPART_WRF/src_flexwrf_v3.1/flexwrf31_pgi_omp $PBS_O_WORKDIR/flexwrf31_pgi_omp
+#chmod 777 *.dat
+#chmod 777 *.t
 
-mkdor output
+mkdir output
 cd meteo
 python get_meteo_data.py
 cd ..
@@ -30,5 +33,5 @@ cat input >> flexwrf.input
 setenv OMP_NUM_THREADS 10
 limit stacksize unlimited
 
-./flexwrf31_gnu_omp flexwrf.input
+./flexwrf31_pgi_omp flexwrf.input
 ~

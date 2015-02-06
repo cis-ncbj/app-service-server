@@ -3,7 +3,12 @@
     "job_size": 3000,
     "quota" : 300000
   },
-  "sets": {},
+  "sets": {
+    "PBS" : {
+        "CIS_SCHEDULER":"pbs",
+        "CIS_QUEUE" :"i12h"
+    }
+  },
   "variables":{
     "start_case": {
       "default" : "20150120 120000",
@@ -82,12 +87,12 @@
         "npart":{
           "type":"int",
           "default": 6000,
-          "values" : [30,10000]
+          "values" : [30,100000]
         },
         "masses":{
           "type":"float_array",
           "default": [1000.0],
-          "values" : [10,10,10000000]
+          "values" : [10,0,10000000]
         },
         "nr":{
           "type":"int",
@@ -108,7 +113,7 @@
         "decaytime":{
           "type":"float",
           "default": -999.9,
-          "values" : [-999.9,1000000000]
+          "values" : [-1.0e+3,1000000000]
         },
         "wetscava":{
           "type":"float",
@@ -128,7 +133,7 @@
         "dryhenry":{
           "type":"float",
           "default": 0.0,
-          "values" : [0.0,1.0e+15]
+          "values" : [0.0,1.0e+16]
         },
         "drya":{
           "type":"float",
