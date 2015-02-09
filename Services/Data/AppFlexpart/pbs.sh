@@ -28,10 +28,10 @@ echo "=====================FORMER PATHNAMES FILE===================" > flexwrf.i
 echo "$PBS_O_WORKDIR/output/" >> flexwrf.input
 echo "$PBS_O_WORKDIR/meteo/" >> flexwrf.input
 echo "$PBS_O_WORKDIR/meteo/AVAILABLE" >> flexwrf.input
+echo "=============================================================" >> flexwrf.input
 cat input >> flexwrf.input
 
-setenv OMP_NUM_THREADS 10
-limit stacksize unlimited
+export OMP_NUM_THREADS=10
+#limit stacksize unlimited
 
 ./flexwrf31_pgi_omp flexwrf.input
-~
