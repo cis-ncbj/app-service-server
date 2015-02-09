@@ -87,7 +87,7 @@
         "npart":{
           "type":"int",
           "default": 6000,
-          "values" : [30,100000]
+          "values" : [30,200000]
         },
         "masses":{
           "type":"float_array",

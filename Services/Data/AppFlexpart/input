@@ -1,3 +1,8 @@
+=====================FORMER PATHNAMES FILE===================
+output/
+meteo/
+meteo/AVAILABLE
+=============================================================
 =====================FORMER COMMAND FILE=====================
     1                                                                                     
     @@{start_case}
@@ -28,7 +33,7 @@
     1                SFC_OPTION        0=default computation of u*, hflux, pblh, 1=from wrf                 !ustawione na stale
     1                WIND_OPTION       0=snapshot winds, 1=mean winds,2=snapshot eta-dot,-1=w based on divergence
     1                TIME_OPTION       1=correction of time validity for time-average wind,  0=no need      !ustawione na stale
-    1                OUTGRID_COORD     0=wrf grid(meters), 1=regular lat/lon grid                           !ustawione na stale
+    0                OUTGRID_COORD     0=wrf grid(meters), 1=regular lat/lon grid                           !ustawione na stale
     1                RELEASE_COORD     0=wrf grid(meters), 1=regular lat/lon grid                           !ustawione na stale
     0                IOUTTYPE          0=default binary, 1=ascii (for particle dump only),2=netcdf          !ustawione na stale
     100               NCTIMEREC (int)   Time frames per output file, only used for netcdf                    !ustawione na stale
