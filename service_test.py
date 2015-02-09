@@ -2,11 +2,11 @@
 import logging
 logging.basicConfig()
 
-from Schedulers import conf, Scheduler
-from Jobs import Job
+from CISAppServer.Schedulers import conf, Scheduler
+from CISAppServer.Jobs import Job
 import os
-from Services import ServiceStore, Service, Validator
-
+from CISAppServer.Services import ServiceStore, Service, Validator
+from shutil import  rmtree
 
 
 def prepare_environment():
@@ -20,15 +20,19 @@ def prepare_environment():
 
 if __name__ == "__main__":
     prepare_environment()
-    # test_payload = os.path.join("C:\\Users\\Krzysztof Gomulski\\Desktop\\test\\AppFlexpart_test2.json")
-    test_payload = os.path.join("C:\Users\gomulskik\Desktop\out_test\AppFlexpart_test2.json")
+    test_payload = os.path.join("C:\\Users\\Krzysztof Gomulski\\Desktop\\test\\AppFlexpart_test.json")
+    #test_payload = os.path.join("C:\Users\gomulskik\Desktop\out_test\AppFlexpart_test2.json")
     filename = os.path.basename(test_payload)
+    print filename
     test_dir = os.path.dirname(os.path.realpath(test_payload))
     conf.gate_path_jobs = test_dir
     conf.log_level = "DEBUG"
     print test_dir
     scheduler = Scheduler()
     work_dir = os.path.join(test_dir, 'work')
+    if os.path.isdir(work_dir):
+        rmtree(work_dir)
+    os.mkdir(work_dir)
     scheduler.work_path = work_dir
     job = Job(filename)
     Validator.validate(job)
