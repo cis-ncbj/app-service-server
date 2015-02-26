@@ -287,14 +287,9 @@ class Scheduler(object):
         logger.debug("@Scheduler - generate scripts")
         for _path, _dirs, _files in os.walk(_script_dir):
             # Relative paths for subdirectories
-            # that is not look well to be honest, besides that it doesn't work on windows ;)
-            #_sub_dir = re.sub("^%s" % _script_dir, '', _path)
-            # that works better
             _sub_dir = os.path.relpath(_path, _script_dir)
             logger.debug("@Scheduler - Sub dir: %s", _sub_dir)
             if _sub_dir != '.':
-                # Remove starting /
-               # _sub_dir = _sub_dir[1:]
                 _out_dir = os.path.join(_work_dir, _sub_dir)
             else:
                 _out_dir = _work_dir
@@ -321,14 +316,14 @@ class Scheduler(object):
                 # Input and output file names
                 _fin_name = os.path.join(_path, _file)
                 _fou_name = os.path.join(_out_dir, _file)
+                _template_name = os.path.join(job.status.service, _sub_dir, _file)
                 try:
                     # Open input template script and output file
-                    # TODO handle subdir
-                    # print os.path.join(conf.service_path_data,job.status.service, _file)
-                    template = self.template_env.get_template(job.status.service+'/'+_sub_dir+'/'+_file)
+                    template = self.template_env.get_template(_template_name)
                     _fou = open(_fou_name, 'w')
 
-                    _fou.write(template.render(job.data.data))
+                    #_fou.write(template.render(job.data.data))
+                    _fou.writelines(template.generate(job.data.data))
                     _fou.close()
                     # Copy file permisions
                     _st = os.stat(_fin_name)
