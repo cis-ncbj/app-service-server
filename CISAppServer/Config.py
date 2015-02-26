@@ -75,8 +75,6 @@ class Config(dict):
         self.config_wait_time = 120
         #: Enabled schedulers
         self.config_schedulers = ('pbs', 'ssh')
-        #: Default scheduler can be overriden per service
-        self.config_default_scheduler = 'ssh'
         #: Maximum number of all active jobs
         self.config_max_jobs = 1000
         #: Number of jobs to be batched together for submit/finalise threads
