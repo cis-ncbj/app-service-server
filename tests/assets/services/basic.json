@@ -40,11 +40,8 @@
       "FloatArray": {
         "type": "float_array",
         "default": [1.2,2.1,77.4],
-        "values": [
-          15,
-          -100,
-          100
-        ]
+        "length": 15,
+        "values": [-100, 100]
       }
     }
 }

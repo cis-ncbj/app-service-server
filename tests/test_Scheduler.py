@@ -42,8 +42,7 @@ class TestGenerateScripts(object):
             shutil.rmtree(work_dir)
         os.mkdir(work_dir)
         cls.scheduler.work_path = work_dir
-
-
+        
     def test_proper_simple_input(self):
         """
         Scheduler.generate_scripts for proper simple input
