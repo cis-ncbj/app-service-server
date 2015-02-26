@@ -33,12 +33,14 @@
     "age_classes":{
       "type": "int_array",
       "default": [7200,999999],
-      "values": [10, 1, 999999]
+      "length" : 10,
+      "values": [1, 999999]
     },
     "vertical_levels":{
       "type": "float_array",
       "default": [100.0,1000.0, 20000.0],
-      "values": [10, 1,  100000]
+      "length": 10,
+      "values": [1,  100000]
     },
     "emissions":{
       "type": "object_array",

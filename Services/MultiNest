@@ -34,22 +34,26 @@
         "node_list_x" : {
             "type" : "float_array",
             "default" : [],
-            "values" : [1000, 0, 10000]
+            "length" : 1000,
+            "values" : [0, 10000]
         },
         "node_list_y" : {
             "type" : "float_array",
             "default" : [],
-            "values" : [1000, 0, 10000]
+            "length" : 1000,
+            "values" : [0, 10000]
         },
         "node_list_xsigma" : {
             "type" : "float_array",
             "default" : [],
-            "values" : [1000, 1, 10000]
+            "length" : 1000,
+            "values" : [1, 10000]
         },
         "node_list_ysigma" : {
             "type" : "float_array",
             "default" : [],
-            "values" : [1000, 1, 10000]
+            "length" : 1000,
+            "values" : [1, 10000]
         },
         "n_live_points" : {
             "type" : "int",

@@ -5,8 +5,6 @@
 # Plugins
 # http://yapsy.sourceforge.net/
 # http://stackoverflow.com/questions/5333128/yapsy-minimal-example
-from functools import partial
-
 import os
 import json
 import csv
@@ -18,6 +16,7 @@ from yapsy.PluginManager import PluginManager
 
 import Jobs  # Import full module - resolves circular dependencies
 from Config import conf, VERBOSE
+
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,7 @@ class Validator(object):
         #: Min API level
         self.api_min = 1.0
         #: Max API level
-        self.api_max = 2.0
+        self.api_max = 2.99
         #: Current API level
         self.api_current = 2.0
         #: Current job instance
@@ -97,10 +96,7 @@ class Validator(object):
         validated data.
 
         :param job: :py:class:`Job` instance
-        :rerurn: True on success False otherwise.
         """
-
-        # self.job = job
 
         # Do not validate jobs for the second time. This will conserve
         # resources in case scheduler queue is full and we try to resubmit
@@ -109,7 +105,6 @@ class Validator(object):
 
         # Make sure job.service is defined
         job.status.service = 'default'
-        job.status.scheduler = conf.config_default_scheduler
 
         # Load job file from jobs directory
         _name = os.path.join(conf.gate_path_jobs, job.id())
@@ -121,9 +116,9 @@ class Validator(object):
         # Check if data contains service attribute and that such service was
         # initialized
         if 'service' not in _data.keys() or \
-                        _data['service'] not in ServiceStore.keys() or \
-                        _data['service'] == 'default':
-            raise ValidatorError("@Validator - Not supported service: %s." %
+                _data['service'] not in ServiceStore.keys() or \
+                _data['service'] == 'default':
+            raise ValidatorError("Not supported service: %s." %
                                  _data['service'])
 
         job.status.service = _data['service']
@@ -133,15 +128,14 @@ class Validator(object):
         if 'input' not in _data.keys():
             _data['input'] = {}
         elif not isinstance(_data['input'], dict):
-            raise ValidatorError(
-                "@Validator - 'input' section is not a dictionary")
+            raise ValidatorError("The 'input' section is not a dictionary")
 
         # Make sure API level is correct
         if 'api' not in _data.keys():
-            raise ValidatorError("@Validator - Job did not specify API level.")
-        if not self.validate_float('api', _data['api'],
+            raise ValidatorError("Job did not specify API level.")
+        if not self.validate_float(['api'], _data['api'],
                                    self.api_min, self.api_max):
-            raise ValidatorError("@Validator - API level %s is not supported." %
+            raise ValidatorError("API level %s is not supported." %
                                  _data['api'])
         elif float(_data['api']) < self.api_current:
             # Deprecated API requested. Mark as such
@@ -150,9 +144,8 @@ class Validator(object):
         # Make sure no unsupported sections were passed
         for _k in _data.keys():
             if _k not in conf.service_allowed_sections:
-                raise ValidatorError(
-                    "@Validator - Section '%s' is not allowed in job "
-                    "definition." % _k)
+                raise ValidatorError("Section '%s' is not allowed in job "
+                                     "definition." % _k)
 
         # Load defaults
         _variables = {
@@ -174,12 +167,12 @@ class Validator(object):
                 elif not isinstance(_v, int):
                     # Value specified neither as int nor string - raise error
                     raise ValidatorError(
-                        "@Validator - Set variables have to be of type int or "
+                        "Set variables have to be of type int or "
                         "string. (%s: %s)" % (_k, _v)
                     )
                 if _v != 1:
                     raise ValidatorError(
-                        "@Validator - Set variables only accept value of 1. "
+                        "Set variables only accept value of 1. "
                         "(%s: %s)" % (_k, _v)
                     )
                 _variables.update(
@@ -192,62 +185,42 @@ class Validator(object):
         for _k, _v in _data['input'].items():
             if _k in conf.service_reserved_keys or _k.startswith('CIS_CHAIN'):
                 raise ValidatorError(
-                    "@Validator - '%s' variable name is restricted." % _k)
+                    "The '%s' variable name is restricted." % _k)
             elif _k in _service.variables.keys():
                 _variables[_k] = _v
             else:
                 raise ValidatorError(
-                    "@Validator - Not supported variable: %s." % _k)
+                    "Not supported variable: %s." % _k)
 
         # Check that all attribute names are defined in service configuration
         # Validate values of the attributes
         for _k, _v in _variables.items():
             if _k in _service.variables.keys():
-                if not self.validate_value(_k, _v, _service):
-                    raise ValidatorError(
-                        "@Validator - Variable value not allowed: %s - %s." %
-                        (_k, _v)
-                    )
-                else:
-                    if _service.variables[_k]['type'] == 'object':
-                        _v = self.set_object_variable(_v, _service.variables[_k]['values'])
-                    elif _service.variables[_k]['type'] == 'object_array':
-                        _v = map(partial(self.set_object_variable,
-                                         variable_definition=_service.variables[_k]['values'][1]),
-                                 _v)
-                    _variables[_k] = _v
-                    logger.debug(
-                        "@Validator - Value passed validation: %s - %s" %
-                        (_k, _v)
-                    )
-            # Check for possible reserved attribuet names like service, name,
+                _variables[_k] = self.validate_value(
+                    [_k], _v, _service.variables[_k])
+                logger.debug(
+                    "Value passed validation: %s = %s", _k, _v
+                )
+            # Check for possible reserved attribute names like service, name,
             # date
             elif _k in conf.service_reserved_keys:
-                if not self.validate_value(_k, _v, ServiceStore['default']):
-                    raise ValidatorError(
-                        "@Validator - Variable value not allowed: %s - %s." %
-                        (_k, _v)
-                    )
-                else:
-                    _variables[_k] = _v
-                    logger.debug(
-                        "@Validator - Value passed validation: %s - %s" %
-                        (_k, _v)
-                    )
+                _variables[_k] = self.validate_value(_k, _v,
+                                                     ServiceStore['default'].variables[_k])
+                logger.debug(
+                    "Value passed validation: %s = %s", _k, _v
+                )
             else:
-                raise ValidatorError(
-                    "@Validator - Not supported variable: %s." % _k)
+                raise ValidatorError("Not supported variable: %s." % _k)
 
         # Validate job output chaining. Check if defined job IDs point to
         # existing jobs in 'done' state.
         if 'chain' in _data.keys():
             if not isinstance(_data['chain'], list) and \
                     not isinstance(_data['chain'], tuple):
-                raise ValidatorError(
-                    "@Validator - 'chain' section is not a list")
+                raise ValidatorError("The 'chain' section is not a list")
 
             if not self.validate_chain(_data['chain']):
-                raise ValidatorError("@Validator - Bad job chain IDs.")
+                raise ValidatorError("Bad job chain IDs.")
             else:
                 _chain = []
                 # Generate keywords for script substitutions
@@ -257,264 +230,287 @@ class Validator(object):
                     _i += 1
                     _chain.append(Jobs.JobChain(id=_id))
                 logger.debug(
-                    "@Validator - Job chain IDs passed validation: %s" %
+                    "Job chain IDs passed validation: %s" %
                     _data['chain']
                 )
                 job.chain = _chain
 
         # Job scheduler
         if 'CIS_SCHEDULER' not in _variables.keys():
-            raise ValidatorError(
-                "@Validator - Scheduler not defined for job %s." % job.id())
+            raise ValidatorError("Job did not define a scheduler")
         job.status.scheduler = _variables['CIS_SCHEDULER']
 
         # Update job data with default values
         job.data = Jobs.JobData(data=_variables)
-        logger.log(VERBOSE, '@Validator - Validated input data:')
+        logger.log(VERBOSE, 'Validated input data:')
         logger.log(VERBOSE, _variables)
 
-    @staticmethod
-    def set_object_variable(_v, variable_definition):
-        """
-
-        :param _v:
-        :param variable_definition:
-        :return:
-        """
-        for key in variable_definition.keys():
-            if key not in _v:
-                _v[key] = variable_definition[key]['default']
-        return _v
-
-    def validate_value(self, key, value, service, nesting_level=0):
+    def validate_value(self, path, value, template, nesting_level=0):
         """
         Validate value for specified service attribute.
 
-        :param key: attribute name
+        :param path: a list of nested attribute names for logging, e.g. [object, list_attribute, 10]
         :param value: value to validate
-        :param service: service object for which attribute is defined
-        :return: True on success False otherwise.
+        :param template: dictionary describing the variable
+            {
+                'type': 'float_array',
+                'default':[1.0, 2.5],
+                'values':[0,100],
+                'length':10
+            }
+
+            Allowed 'type's:
+            * string
+            * int
+            * float
+            * datetime
+            * object
+            * string_array
+            * int_array
+            * float_array
+            * datetime_array
+            * object_array
+
+            'default' should be of an appropriate type.
+
+            'values' defines allowed value of the variable:
+            * string - white list of strings
+            * int, float - [min. max]
+            * datetime - strptime format string
+            * object - dictionary with keys being attribute names and values dictionaries defining variable templates
+
+            'length' is only mandatory for array types and defines maximum allowed length
+        :param nesting_level: current nesting level
+        :return: validated variable
         """
 
         # temporary cache variables
-        variable_type = service.variables[key]['type']
-        variable_allowed_values = service.variables[key]['values']
+        _variable_type = template['type']
+        _variable_allowed_values = template['values']
 
-        if variable_type == 'string':
+        # Run specific validate method based on type of the validated value
+        if _variable_type == 'string':
             # Attribute of type string check the table of allowed values
-            if not value in variable_allowed_values:
-                logger.warning("@Validator - Value not allowed: %s - %s." %
-                               (key, value))
-                return False
-        elif variable_type == 'int':
+            if value not in _variable_allowed_values:
+                raise ValidatorError(
+                    "%s = %s - Value not in the white list (%s)." %
+                    (value, ".".join(path), _variable_allowed_values))
+            return value
+        elif _variable_type == 'int':
             try:
                 return self.validate_int(
-                    key, value,
-                    variable_allowed_values[0],
-                    variable_allowed_values[1]
+                    path, value,
+                    _variable_allowed_values[0],
+                    _variable_allowed_values[1]
                 )
             except IndexError:
-                logger.error(
-                    "@Validator - Badly defined range for variable:  %s" %
-                    key
+                raise ValidatorError(
+                    "Wrong range definition for variable:  %s" % ".".join(path)
                 )
-                return False
-        elif variable_type == 'float':
+        elif _variable_type == 'float':
             try:
                 return self.validate_float(
-                    key, value,
-                    variable_allowed_values[0],
-                    variable_allowed_values[1]
+                    path, value,
+                    _variable_allowed_values[0],
+                    _variable_allowed_values[1]
                 )
             except IndexError:
-                logger.error(
-                    "@Validator - Badly defined range for variable:  %s" %
-                    key
+                raise ValidatorError(
+                    "Wrong range definition for variable:  %s" % ".".join(path)
                 )
-                return False
-        elif variable_type == 'string_array':
-            if not isinstance(value, list) and not isinstance(value, tuple):
-                logger.error(
-                    "@Validator - Value is not a proper array:  %s", key
-                )
-                return False
+        elif _variable_type == 'datetime':
             try:
-                if len(value) > variable_allowed_values[0]:
-                    logger.error(
-                        "@Validator - Array  exceeds allowed length:  %s", key
-                    )
-                    return False
-            except IndexError:
-                logger.error(
-                    "@Validator - Badly defined range for variable:  %s" %
-                    key
-                )
-                return False
-            for _v in value:
-                if not _v in variable_allowed_values[1:]:
-                    logger.warning("@Validator - Value not allowed: %s - %s." %
-                                   (key, value))
-                    return False
-        elif variable_type == 'int_array':
-            if not isinstance(value, list) and not isinstance(value, tuple):
-                logger.error(
-                    "@Validator - Value is not a proper array:  %s", key
-                )
-                return False
-            try:
-                if len(value) > variable_allowed_values[0]:
-                    logger.error(
-                        "@Validator - Array  exceeds allowed length:  %s", key
-                    )
-                    return False
-            except IndexError:
-                logger.error(
-                    "@Validator - Badly defined range for variable:  %s" %
-                    key
-                )
-                return False
-            _min = 0
-            _max = 0
-            try:
-                _min = variable_allowed_values[1]
-                _max = variable_allowed_values[2]
-            except IndexError:
-                logger.error(
-                    "@Validator - Badly defined range for variable:  %s" %
-                    key
-                )
-                return False
-            for _v in value:
-                if not self.validate_int(key, _v, _min, _max):
-                    return False
-        elif variable_type == 'float_array':
-            if not isinstance(value, list) and not isinstance(value, tuple):
-                logger.error(
-                    "@Validator - Value is not a proper array:  %s", key
-                )
-                return False
-            try:
-                if len(value) > variable_allowed_values[0]:
-                    logger.error(
-                        "@Validator - Array  exceeds allowed length:  %s", key
-                    )
-                    return False
-            except IndexError:
-                logger.error(
-                    "@Validator - Badly defined range for variable:  %s" %
-                    key
-                )
-                return False
-            _min = 0
-            _max = 0
-            try:
-                _min = variable_allowed_values[1]
-                _max = variable_allowed_values[2]
-            except IndexError:
-                logger.error(
-                    "@Validator - Badly defined range for variable:  %s" %
-                    key
-                )
-                return False
-            for _v in value:
-                if not self.validate_float(key, _v, _min, _max):
-                    return False
-        elif variable_type == 'datetime':
-            try:
-                datetime.strptime(value, variable_allowed_values)
+                datetime.strptime(value, _variable_allowed_values)
             except ValueError:
-                logger.error(
-                    "@Validator - DateTime variable given in unsupported format:  %s" %
-                    key
+                raise ValidatorError(
+                    "%s = %s - value not in supported format (%s)" %
+                    (".".join(path), value, _variable_allowed_values)
                 )
-                return False
-        elif variable_type == 'object':
-             # prevent from infinite recurrence
-            if nesting_level>=conf.service_max_nesting_level:
-                logger.error(
-                    "@Validator - Unsupported nesting level above %d :  %s" %
-                    (conf.service_max_nesting_level, key)
+            return value
+        elif _variable_type == 'object':
+            # prevent from infinite recurrence
+            if nesting_level >= conf.service_max_nesting_level:
+                raise ValidatorError(
+                    "Unsupported object nesting level above %d :  %s" %
+                    (conf.service_max_nesting_level, ".".join(path))
                 )
-                return False
-            if not isinstance(value, dict):
-                logger.error(
-                    "@Validator - Value is not a proper dictionary:  %s", key
-                )
-                return False
-            try:
-                return self.validate_object(value, variable_allowed_values)
-            except:
-                logger.error(
-                    "@Validator - One or more variables in object %s are invalid" %
-                    key
-                )
-                return False
-        elif variable_type == 'object_array':
-            if not isinstance(value, list) and not isinstance(value, tuple):
-                logger.error(
-                    "@Validator - Value is not a proper array:  %s", key
-                )
-                return False
-            try:
-                if len(value) > variable_allowed_values[0]:
-                    logger.error(
-                        "@Validator - Array exceeds allowed length:  %s", key
-                    )
-                    return False
-            except IndexError:
-                logger.error(
-                    "@Validator - Badly defined range for variable:  %s" %
-                    key
-                )
-                return False
-            if not isinstance(variable_allowed_values[1], dict):
-                logger.error(
-                    "@Validator - Badly defined schema for variable:  %s", key
-                )
-                return False
-            for _v in value:
-                if not self.validate_object(_v, variable_allowed_values[1]):
-                    return False
+            return self.validate_object(
+                path, value, _variable_allowed_values, nesting_level)
+        elif _variable_type == 'string_array':
+            return self.validate_array(
+                path, value, template["length"],
+                {'type': 'string', 'values': _variable_allowed_values},
+                nesting_level
+            )
+        elif _variable_type == 'int_array':
+            return self.validate_array(
+                path, value, template["length"],
+                {'type': 'int', 'values': _variable_allowed_values},
+                nesting_level
+            )
+        elif _variable_type == 'float_array':
+            return self.validate_array(
+                path, value, template["length"],
+                {'type': 'float', 'values': _variable_allowed_values},
+                nesting_level
+            )
+        elif _variable_type == 'object_array':
+            return self.validate_array(
+                path, value, template["length"],
+                {'type': 'object', 'values': _variable_allowed_values},
+                nesting_level
+            )
 
-        # for any unknown variable types when for example there is an error in service config
-        # whole function should return False, but i keep it that way for now
-        else:
-            return False
+        raise ValidatorError("(%s)%s - Unknown variable type" %
+                             (_variable_type, ".".join(path)))
 
-        return True
-
-    def validate_object(self, value, allowed_values):
+    def validate_array(self, path, value, length, template, nesting_level=0):
         """
-        :param value:
-        :param allowed_values:
-        :return:
+        Validate array types: string_array, int_array, float_array, datetime_array, object_array
+        :param path: a list of nested attribute names for logging, e.g. [object, list_attribute, 10]
+        :param value: value to validate
+        :param length: maximum allowed length of the array
+        :param template: template defining elements of the array
+        :param nesting_level: current nesting level
+        :return: validated array
         """
-        # allowed_values = service.variables[key]['values']
-        inner_variables = {
-            _k: _v['default'] for _k, _v in allowed_values.items()
+        if not isinstance(value, list) and not isinstance(value, tuple):
+            raise ValidatorError(
+                "%s is not a proper array" % ".".join(path)
+            )
+        try:
+            if len(value) > length:
+                raise ValidatorError(
+                    "len(%s) = %s - array exceeds allowed length (%s)" %
+                    (".".join(path), len(value), length)
+                )
+        except IndexError:
+            raise ValidatorError(
+                "%s has wrong range definition" % ".".join(path)
+            )
+        _i = 0
+        _result = []
+        for _v in value:
+            _result.append(self.validate_value(
+                path + [str(_i)],
+                _v,
+                {
+                    "type": template["type"],
+                    "values": template["values"]
+                },
+                nesting_level
+            ))
+        return _result
+
+    def validate_object(self, path, value, template, nesting_level):
+        """
+        Validate object type
+        :param path: a list of nested attribute names for logging, e.g. [object, list_attribute, 10]
+        :param value: value to validate
+        :param template: template defining the object structure
+        :param nesting_level: current nesting level
+        :return: validated array
+        """
+        # Check the value format
+        if not isinstance(value, dict):
+            raise ValidatorError(
+                "Value is not a proper dictionary:  %s" % ".".join(path)
+            )
+        # Increase recurrence level
+        nesting_level += 1
+
+        # Load defaults
+        _inner_variables = {
+            _k: _v['default'] for _k, _v in template.items()
         }
         for _k, _v in value.items():
+            # Reserved keys
             if _k in conf.service_reserved_keys or _k.startswith('CIS_CHAIN'):
-                logger.error(
-                    "@Validator - '%s' variable name is restricted." % ( _k))
-                return False
-            elif _k in allowed_values.keys():
-                # some recurrent stuff
-                if not self.validate_value(_k,_v,
-                                           type('service_spoof', (object,),
-                                                {'variables' : allowed_values}),
-                                           #service.variables[key],
-                                           nesting_level=1):
-                    # better to raise error?
-                    print _k,_v
-                    logger.error(
-                        "@Validator - Variable value not allowed: %s - %s." % (_k, _v))
-                    return False
+                raise ValidatorError(
+                    "The attribute '%s' name of object '%s' is restricted." %
+                    (_k, ".".join(path)))
+            elif _k in template.keys():
+                # Validate value using reccurence
+                _inner_variables[_k] = self.validate_value(
+                    path + [_k],
+                    _v,
+                    template[_k],
+                    nesting_level)
             else:
-                logger.error(
-                    "@Validator -  Not supported variable: %s." % ( _k))
-                return False
-        return True
+                raise ValidatorError(
+                    "Not supported attribute '%s' for object '%s'" %
+                    (_k, ".".join(path)))
+        return _inner_variables
+
+    def validate_int(self, path, value, min, max):
+        """
+        Validate integer type
+        :param path: a list of nested attribute names for logging, e.g. [object, list_attribute, 10]
+        :param value: value to validate
+        :param min: minimal allowed value
+        :param max: maximum allowed value
+        :return: validated int
+        """
+        # Attribute of type int - check the format
+        if isinstance(value, str) or isinstance(value, unicode):
+            # Value specified as string - check the format using python
+            # builtin conversion
+            try:
+                _v = int(value)
+            except ValueError:
+                raise ValidatorError("%s = %s - value does not decribe an integer" %
+                                     (".".join(path), value)
+                )
+        elif not isinstance(value, int):
+            # Value specified neither as int nor string - raise error
+            raise ValidatorError("%s = %s - value is not an int" %
+                                 (".".join(path), value))
+        else:
+            _v = value
+
+        # Check that atrribute value falls in allowed range
+        if _v < min or _v > max:
+            raise ValidatorError(
+                "%s = %s - value not in allowed range (%s)" %
+                (".".join(path), _v, (min, max))
+            )
+
+        return _v
+
+    def validate_float(self, path, value, min, max):
+        """
+        Validate float type
+        :param path: a list of nested attribute names for logging, e.g. [object, list_attribute, 10]
+        :param value: value to validate
+        :param min: minimal allowed value
+        :param max: maximum allowed value
+        :return: validated float
+        """
+        # Attribute of type float - check the format
+        if isinstance(value, str) or isinstance(value, unicode):
+            # Value specified as string - check the format using python
+            # builtin conversion
+            try:
+                _v = float(value)
+            except ValueError:
+                raise ValidatorError("%s = %s - value does not decribe a float" %
+                                     (".".join(path), value)
+                )
+        elif not isinstance(value, float) and not isinstance(value, int):
+            # Value specified neither as float nor string - raise error
+            raise ValidatorError("%s = %s - value is not a float" %
+                                 (".".join(path), value))
+        else:
+            _v = value
+
+        # Check that atrribute value falls in allowed range
+        if _v < min or _v > max:
+            raise ValidatorError(
+                "%s = %s - value not in allowed range (%s)" %
+                (".".join(path), _v, (min, max))
+            )
+
+        return _v
 
     def validate_file(self, key, job, service):
         """
@@ -545,71 +541,18 @@ class Validator(object):
                 if not self.validate_float("CSV element", _v, min, max):
                     return False
 
-    def validate_int(self, key, value, min, max):
-        # Attribute of type int - check the format
-        try:
-            if isinstance(value, str) or isinstance(value, unicode):
-                # Value specified as string - check the format using python
-                # builtin conversion
-                _v = int(value)
-            elif not isinstance(value, int):
-                # Value specified neither as int nor string - raise error
-                raise ValueError("%s is not an int" % value)
-            else:
-                _v = value
-        except ValueError:
-            logger.warning('@Validator - Value is not a proper int.',
-                           exc_info=True)
-            return False
-
-        # Check that atrribute value falls in allowed range
-        if _v < min or _v > max:
-            logger.warning(
-                "@Validator - Value not in allowed range: %s - %s" %
-                (key, _v)
-            )
-            return False
-
-        return True
-
-    def validate_float(self, key, value, min, max):
-        # Attribute of type float - check the format
-        try:
-            if isinstance(value, str) or isinstance(value, unicode):
-                # Value specified as string - check the format using python
-                # builtin conversion
-                _v = float(value)
-            elif not isinstance(value, float) and not isinstance(value, int):
-                # Value specified neither as float nor string - raise error
-                raise ValueError("%s is not a float" % value)
-            else:
-                _v = value
-        except ValueError:
-            logger.warning('@Validator - Value is not a proper float',
-                           exc_info=True)
-            return False
-
-        # Check that atrribute value falls in allowed range
-        if _v < min or _v > max:
-            logger.warning(
-                "@Validator - Value not in allowed range: %s - %s" %
-                (key, _v)
-            )
-            return False
-
-        return True
-
     def validate_chain(self, chain):
+        """
+        Validate input chains
+        :param chain: list of job IDs this job depends on.
+        """
         _finished = (_j.id() for _j in Jobs.StateManager.get_job_list('done'))
         for _id in chain:
             # ID of type string check if it is listed among finished jobs
-            if not _id in _finished:
-                logger.warning(
-                    "@Validator - Job %s did not finish or does not exist. "
-                    "Unable to chain output." %
-                    _id)
-                return False
-        return True
+            if _id not in _finished:
+                raise ValidatorError(
+                        "Chain job %s did not finish or does not exist."
+                        % _id)
 
 
 class Service(dict):
@@ -691,4 +634,3 @@ class ServiceStore(dict):
 Validator = Validator()
 #: ServiceStore singleton
 ServiceStore = ServiceStore()
-
