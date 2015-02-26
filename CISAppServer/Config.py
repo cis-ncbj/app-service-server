@@ -75,8 +75,8 @@ class Config(dict):
         self.config_wait_time = 120
         #: Enabled schedulers
         self.config_schedulers = ('pbs', 'ssh')
-        #: Default scheduler can be overriden per service
-        self.config_default_scheduler = 'ssh'
+        #: Default scheduler
+        self.service_scheduler = 'pbs'
         #: Maximum number of all active jobs
         self.config_max_jobs = 1000
         #: Number of jobs to be batched together for submit/finalise threads
@@ -192,7 +192,7 @@ class Config(dict):
         self.service_allowed_sections = ('service', 'api', 'input', 'chain')
         #: Reserved key names for job parameters
         self.service_reserved_keys = (
-            'CIS_SCHEDULER', 'CIS_QUEUE'
+            'CIS_SCHEDULER', 'CIS_QUEUE', 'CIS_SSH_HOST'
         )
         #: Default user name for job execution
         self.service_username = 'apprunner'
