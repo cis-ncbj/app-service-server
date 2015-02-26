@@ -39,41 +39,21 @@ done
 # The exit codes are stored in *.dat files
 DIR=/tmp/$USER/shpool
 # PID file pattern - do not expand * here
-PATTERN=$DIR'/*.id'
+PATTERN=$DIR'/*.dat'
 
 if [ ! -d $DIR ]
 then
     mkdir -p $DIR
 fi
 
-# Loop over PID files. Do not put PATTERN inside quotes so that * is expanded
-for ID in $PATTERN
-do
-    # If no *.id files are found the ID is equal to PATTERN
-    if [ "$ID" == "$PATTERN" ]
-    then
-        exit 0
-    fi
+# Print running processes
+ps -u $USER -o pid | grep -v PID | awk '{print $1" -1"}'
 
-    # Get the process pid and check that it is present in system proc table
-    PID=$(cat $ID)
-    if [ -d /proc/$PID ]
-    then
-        # Process is running
-        echo "$PID -1"
-    else
-        # Check that .dat file exists
-        STATE=$(echo $ID | sed 's/\.id/\.dat/')
-        if [ -f $STATE ]
-        then
-            # Return job exit state
-            echo "$PID $(cat $STATE)"
-        else
-            # No .dat file present - something went wrong
-            echo "$PID -2"
-        fi
-        # Remove info about finished processes
-        rm -f $ID
-        rm -f $STATE
-    fi
-done
+# Print finished processes
+cat $PATTERN
+
+# Remove info about processes finished more than an hour ago
+find $DIR -name "*.dat" -type f -mmin +60 | sed 's/\.dat/\.id/' | xargs rm -f
+find $DIR -name "*.dat" -type f -mmin +60 -delete
+
+exit 0

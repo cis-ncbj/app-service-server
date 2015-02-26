@@ -41,38 +41,24 @@ KILL_PID=$1
 # The PIDs are stored in *.id files
 # The exit codes are stored in *.dat files
 DIR=/tmp/$USER/shpool
-# PID file pattern - do not expand * here
-PATTERN=$DIR'/*.id'
 
 if [ ! -d $DIR ]
 then
     mkdir -p $DIR
 fi
 
-# Loop over PID files. Do not put PATTERN inside quotes so that * is expanded
-for ID in $PATTERN
-do
-    # If no *.id files are found the ID is equal to PATTERN
-    if [ "$ID" == "$PATTERN" ]
+# Get the process pid and check that it is present in system proc table
+if [ -d /proc/$KILL_PID ]
+then
+    kill $KILL_PID
+    sleep 1
+    # If still running send KILL signal
+    if [ -d /proc/$KILL_PID ]
     then
-        echo "Job $PID not found."
-        exit 1
+        kill -9 $KILL_PID
     fi
+    exit 0
+fi
 
-    # Get the process pid and check that it is present in system proc table
-    PID=$(cat $ID)
-    if [[ $PID == $KILL_PID ]]
-    then
-        kill $KILL_PID
-        sleep 1
-        # If still running send KILL signal
-        if [ -d /proc/$PID ]
-        then
-            kill -9 $KILL_PID
-        fi
-        exit 0
-    fi
-done
-
-echo "Job $PID not found."
+echo "Job $KILL_PID not found."
 exit 1

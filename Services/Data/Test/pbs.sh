@@ -25,7 +25,7 @@ echo 2 | tee -a progress.log
 sleep @@{SLEEP}
 echo 1 | tee -a progress.log
 
-python -c "print @@{1Float} / @@{2Float}"
+python -c "print @@{Int} * @@{1Float} / @@{2Float}"
 @@{COMMAND}
 
 exit $?

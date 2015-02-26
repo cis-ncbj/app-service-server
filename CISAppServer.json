@@ -9,6 +9,22 @@
     // Every n-th status query dump the progress logs (default: 2)
     //"config_progress_step" : 2,
     //
+    // Every n-th status query run garbage collector
+    // "config_garbage_step" : 5,
+    //
+    // Timeout for job cleanup before forcing shutdown
+    // "config_shutdown_time" : 2,
+    //
+    // Timeout for jobs with wait flag in seconds (Job with wait flag will
+    // be ignored when processing the waiting queue)
+    // "config_wait_time" : 600,
+    //
+    // Enabled schedulers
+    // "config_schedulers" : ["pbs", "ssh"],
+    //
+    // Maximum number of all active jobs
+    // "config_max_jobs" : 1000,
+    //
     // ***************
     // Daemon settings
     // ***************
@@ -34,7 +50,7 @@
     //"log_level" : "INFO",
     //
     // Log output file name (default: /tmp/CISAppServer.log)
-    //log_output : "/tmp/CISAppServer.log"
+    //log_output : "/tmp/CISAppServer.log",
     //
     // ************
     // PBS settings
@@ -54,6 +70,22 @@
     // Maximum number of concurent PBS jobs (default: 100)
     //"pbs_max_jobs" : 100,
     //
+    // ************
+    // SSH settings
+    // ************
+    //
+    // Path where SSH backend will store job IDs
+    // "ssh_path_queue" : "SSH/Queue",
+    //
+    // Path where SSH backeng will create job working directories
+    // "ssh_path_work" : "SSH/Scratch",
+    //
+    // Name of default SSH execution host
+    // "ssh_default_queue" : "localhost",
+    //
+    // Maximum number of concurent jobs per SSH execution host
+    // "ssh_max_jobs" : { "localhost" : 2 },
+    //
     // **********************
     // Services/Apps settings
     // **********************
@@ -64,7 +96,10 @@
     //
     // Path with services scripts and input files, can be relative to Daemon
     // working directory (default: Services/Data)
-    //"service_path_data" : "Services/Data"
+    //"service_path_data" : "Services/Data",
+    //
+    // Default user name for job execution
+    // "service_username" : "apprunner",
     //
     // Default interval in hours when job will not be removed by garbage
     // collector (default: 2)
@@ -77,6 +112,13 @@
     // Default interval in hours after which job is automatically killed if in
     // running state (default: 12)
     //"service_max_runtime" : 12,
+    //
+    // Defaul maximum disk size used by service output files in MB
+    // "service_quota" : 10000,
+    //
+    // Default expected output size of a job in MB. It is used to estimate
+    // space requirements for jobs that are to be scheduled.
+    // "service_job_size" : 50,
     //
     // ****************
     // Gateway settings
@@ -93,7 +135,7 @@
     // Path where jobs output is moved before removal (aleviates problems
     // with files that are still in use), can be relative to Daemon
     // working directory (default: Dump)
-    //"gate_path_dump" : "Dump"
+    //"gate_path_dump" : "Dump",
     //
     // ***
     // END

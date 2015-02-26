@@ -13,10 +13,10 @@ try:
 except:
     import simplejson as json
 
-VERBOSE = 5
-
-
 logger = logging.getLogger(__name__)
+
+
+VERBOSE = 5
 
 
 class ExitCodes:
@@ -61,14 +61,28 @@ class Config(dict):
 
         # Define default values
         self.config_file = None  #: Config file name
+        self.config_db = 'sqlite:///jobs.db'
         #: Sleep interval in seconds between job status queries
-        self.config_sleep_time = 3
+        self.config_sleep_time = 5
         #: Every n-th status query dump the progress logs
-        self.config_progress_step = 2
+        self.config_progress_step = 1
+        #: Every n-th status query run garbage collector
+        self.config_garbage_step = 5
         #: Timeout for job cleanup before forcing shutdown
         self.config_shutdown_time = 2
+        #: Timeout for jobs with wait flag in seconds (Job with wait flag will
+        #  be ignored when processing the waiting queue)
+        self.config_wait_time = 120
         #: Enabled schedulers
         self.config_schedulers = ('pbs', 'ssh')
+        #: Default scheduler can be overriden per service
+        self.config_default_scheduler = 'ssh'
+        #: Maximum number of all active jobs
+        self.config_max_jobs = 1000
+        #: Number of jobs to be batched together for submit/finalise threads
+        self.config_batch_jobs = 10
+        #: Maximum number of active threads
+        self.config_max_threads = 4
         #: Daemon mode pid file path
         self.daemon_path_pidfile = '/tmp/CISAppServer.pid'
         #: Timeout for daemon mode pid file acquisition
@@ -79,6 +93,7 @@ class Config(dict):
         self.daemon_path_installdir = \
             os.path.dirname(os.path.realpath(__file__))
         self.log_level = 'INFO'  #: Logging level
+        self.log_level_db = 'WARN' #: Logging level for DB calls
         self.log_output = '/tmp/CISAppServer.log'  #: Log output file name
         self.log_level_cli = None  #: Logging level CLI override
         self.log_output_cli = None  #: Log output file name CLI override
@@ -91,11 +106,16 @@ class Config(dict):
             'formatters': {
                 'verbose': {
                     'format':
-                    '%(levelname)s %(asctime)s %(module)s : %(message)s',
-                    'datefmt': '%m-%d %H:%M:%S',
+                    '%(levelname)7s %(asctime)s : %(message)s',
+                    #'datefmt': '%m-%d %H:%M:%S',
+                },
+                'debug': {
+                    'format':
+                    '== %(levelname)7s %(asctime)s [%(threadName)s:%(filename)s:%(lineno)s - %(funcName)s()] :\n%(message)s',
+                    #'datefmt': '%m-%d %H:%M:%S',
                 },
                 'simple': {
-                    'format': '%(levelname)s %(message)s'
+                    'format': '%(levelname)-8s %(message)s'
                 },
             },
             'handlers': {
@@ -115,12 +135,18 @@ class Config(dict):
                 },
                 'file': {
                     'level': self.log_level,
-                    'class': 'logging.handlers.RotatingFileHandler',
+                    'class': 'logging.FileHandler',
                     'formatter': 'verbose',
                     'filename': self.log_output,
-                    'maxBytes': 10000000,
-                    'backupCount': 5,
                 }
+#                'file': {
+#                    'level': self.log_level,
+#                    'class': 'logging.handlers.RotatingFileHandler',
+#                    'formatter': 'verbose',
+#                    'filename': self.log_output,
+#                    'maxBytes': 10000000,
+#                    'backupCount': 5,
+#                }
             },
             'root': {
                 'handlers': ['console', 'file', 'mail'],
@@ -143,6 +169,11 @@ class Config(dict):
         self.ssh_max_jobs = {
             'localhost': 2
         }
+        self.ssh_known_hosts = \
+                os.path.join(
+                    os.path.join(os.environ["HOME"], ".ssh"),
+                    "known_hosts"
+                )
         #: Path with services configuration files
         self.service_path_conf = 'Services'
         #: Path with services scripts and input files
@@ -150,8 +181,12 @@ class Config(dict):
         #: Valid job states as well as names of directories on shared storage
         #: that are used to monitor job states
         self.service_states = (
-            'waiting', 'queued', 'running', 'closing', 'cleanup',
-            'done', 'failed', 'aborted', 'killed',
+            'new', 'waiting', 'processing', 'queued', 'running', 'closing',
+            'cleanup', 'done', 'failed', 'aborted', 'killed',
+        )
+        #: Valid job flags
+        self.service_flags = (
+            "stop", "delete", "wait_quota", "wait_input", "old_api"
         )
         #: Allowed sections in job submission JSON
         self.service_allowed_sections = ('service', 'api', 'input', 'chain')
@@ -192,12 +227,16 @@ class Config(dict):
         self.gate_path_dump = 'Dump'
         #: Path where jobs description is stored
         self.gate_path_jobs = None
-        #: Path where jobs exit status is stored
-        self.gate_path_exit = None
         #: Path where jobs internal state is stored
         self.gate_path_opts = None
+        #: Path where job timestamps are stored
+        self.gate_path_time = None
+        #: Path where new jobs are symlinked
+        self.gate_path_new = None
         #: Path where waiting jobs are symlinked
         self.gate_path_waiting = None
+        #: Path where jobs during submission are symlinked
+        self.gate_path_processing = None
         #: Path where queued jobs are symlinked
         self.gate_path_queued = None
         #: Path where running jobs are symlinked
@@ -206,21 +245,25 @@ class Config(dict):
         self.gate_path_closing = None
         #: Path where jobs during cleanup are symlinked
         self.gate_path_cleanup = None
-        #: Path were where done jobs are symlinked
+        #: Path where done jobs are symlinked
         self.gate_path_done = None
-        #: Path were where failed jobs are symlinked
+        #: Path where failed jobs are symlinked
         self.gate_path_failed = None
-        #: Path were where aborted jobs are symlinked
+        #: Path where aborted jobs are symlinked
         self.gate_path_aborted = None
-        #: Path were where killed jobs are symlinked
+        #: Path where killed jobs are symlinked
         self.gate_path_killed = None
-        #: Path were where jobs scheduled for removal are symlinked
-        self.gate_path_delete = None
-        #: Path were where jobs scheduled to be killed are symlinked
-        self.gate_path_stop = None
-        #: Dictionary of job states with corresponding paths
+        #: Path where job flags are stored
+        self.gate_path_flags = None
+        self.gate_path_flag_stop = None
+        self.gate_path_flag_delete = None
+        self.gate_path_flag_wait_quota = None
+        self.gate_path_flag_wait_input = None
+        self.gate_path_flag_old_api = None
         self.gate_path = {
+            "new": None,
             "waiting": None,
+            "processing": None,
             "queued": None,
             "running": None,
             "closing": None,
@@ -229,8 +272,11 @@ class Config(dict):
             "failed": None,
             "aborted": None,
             "killed": None,
-            "delete": None,
-            "stop": None,
+            "flag_stop": None,
+            "flag_delete": None,
+            "flag_wait_quota": None,
+            "flag_wait_input": None,
+            "flag_old_api": None,
         }
 
     def load(self, conf_name=None):
@@ -244,12 +290,13 @@ class Config(dict):
 
         if conf_name is not None:
             # Load configuration from option file
-            logger.debug("@Config - Loading global configuration: %s" %
+            logger.debug("@Config - Loading global configuration: %s",
                          conf_name)
             self.config_file = conf_name
             with open(self.config_file) as _conf_file:
                 _conf = self.json_load(_conf_file)
-            logger.log(VERBOSE, json.dumps(_conf))
+            if logger.getEffectiveLevel() <= VERBOSE:
+                logger.log(VERBOSE, json.dumps(_conf))
             self.update(_conf)
 
         logger.debug('@Config - Finalise configuration initialisation')
@@ -264,6 +311,9 @@ class Config(dict):
             for _key in self.log_config['handlers'].keys():
                 if _key != 'mail':
                     self.log_config['handlers'][_key]['level'] = self.log_level
+                if _key == 'file' and \
+                    (self.log_level == 'DEBUG' or self.log_level == 'VERBOSE'):
+                    self.log_config['handlers'][_key]['formatter'] = 'debug'
             self.log_config['root']['level'] = self.log_level
         if self.log_output is not None and \
            'file' in self.log_config['handlers'].keys():
@@ -282,18 +332,31 @@ class Config(dict):
             if '_path_' in _key and isinstance(_value, (str, unicode)):
                 logger.log(
                     VERBOSE,
-                    '@Config - Correct path to full one: %s -> %s.' %
-                    (_key, _value)
+                    '@Config - Correct path to full one: %s -> %s.',
+                    _key, _value
                 )
                 self[_key] = os.path.realpath(_value)
 
         # Generate subdir names
         self.gate_path_jobs = os.path.join(self.gate_path_shared, 'jobs')
-        self.gate_path_exit = os.path.join(self.gate_path_shared, 'exit')
         self.gate_path_opts = os.path.join(self.gate_path_shared, 'opts')
+        self.gate_path_time = os.path.join(self.gate_path_shared, 'time')
+        self.gate_path_flags = os.path.join(self.gate_path_shared, 'flags')
+        self.gate_path_flag_stop = \
+            os.path.join(self.gate_path_flags, 'stop')
+        self.gate_path_flag_delete = \
+            os.path.join(self.gate_path_flags, 'delete')
+        self.gate_path_flag_wait_quota = \
+            os.path.join(self.gate_path_flags, 'wait_quota')
+        self.gate_path_flag_wait_input = \
+            os.path.join(self.gate_path_flags, 'wait_input')
+        self.gate_path_flag_old_api = \
+            os.path.join(self.gate_path_flags, 'old_api')
 
         # Generate job state subdirs
+        self.gate_path_new = os.path.join(self.gate_path_shared, 'new')
         self.gate_path_waiting = os.path.join(self.gate_path_shared, 'waiting')
+        self.gate_path_processing = os.path.join(self.gate_path_shared, 'processing')
         self.gate_path_queued = os.path.join(self.gate_path_shared, 'queued')
         self.gate_path_running = os.path.join(self.gate_path_shared, 'running')
         self.gate_path_closing = os.path.join(self.gate_path_shared, 'closing')
@@ -302,10 +365,10 @@ class Config(dict):
         self.gate_path_failed = os.path.join(self.gate_path_shared, 'failed')
         self.gate_path_aborted = os.path.join(self.gate_path_shared, 'aborted')
         self.gate_path_killed = os.path.join(self.gate_path_shared, 'killed')
-        self.gate_path_delete = os.path.join(self.gate_path_shared, 'delete')
-        self.gate_path_stop = os.path.join(self.gate_path_shared, 'stop')
         self.gate_path = {
+            "new": self.gate_path_new,
             "waiting": self.gate_path_waiting,
+            "processing": self.gate_path_processing,
             "queued": self.gate_path_queued,
             "running": self.gate_path_running,
             "closing": self.gate_path_closing,
@@ -314,8 +377,11 @@ class Config(dict):
             "failed": self.gate_path_failed,
             "aborted": self.gate_path_aborted,
             "killed": self.gate_path_killed,
-            "delete": self.gate_path_delete,
-            "stop": self.gate_path_stop,
+            "flag_stop": self.gate_path_flag_stop,
+            "flag_delete": self.gate_path_flag_delete,
+            "flag_wait_quota": self.gate_path_flag_wait_quota,
+            "flag_wait_input": self.gate_path_flag_wait_input,
+            "flag_old_api": self.gate_path_flag_old_api,
         }
 
         # Create those paths if they do not exist
@@ -325,11 +391,17 @@ class Config(dict):
             "gate_path_output",
             "gate_path_dump",
             "gate_path_jobs",
-            "gate_path_exit",
             "gate_path_opts",
-            "gate_path_delete",
-            "gate_path_stop",
+            "gate_path_time",
+            "gate_path_flags",
+            "gate_path_flag_stop",
+            "gate_path_flag_delete",
+            "gate_path_flag_wait_quota",
+            "gate_path_flag_wait_input",
+            "gate_path_flag_old_api",
+            "gate_path_new",
             "gate_path_waiting",
+            "gate_path_processing",
             "gate_path_queued",
             "gate_path_running",
             "gate_path_cleanup",
@@ -347,7 +419,6 @@ class Config(dict):
             if not os.path.isdir(self[_path]):
                 self.mkdir_p(self[_path])
 
-        logger.log(VERBOSE, self)
 
     def json_load(self, file):
         """
