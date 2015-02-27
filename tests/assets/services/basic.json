@@ -1,0 +1,47 @@
+{
+    "config" : {},
+    "sets": {},
+    "variables" : {
+      // Sleep interval
+      "SLEEP": {
+        "type": "float",
+        "default": 1,
+        "values": [
+          0,30
+        ]
+      },
+      // Norm
+      "Int": {
+        "type": "int",
+        "default": 10,
+        "values": [
+          0,
+          1000
+        ]
+      },
+      // Nominator
+      "_1Float": {
+        "type": "float",
+        "default": 1.0,
+        "values": [
+          -100,
+          100
+        ]
+      },
+      // Denominator
+      "_2Float": {
+        "type": "float",
+        "default": 20.99,
+        "values": [
+          -100,
+          100
+        ]
+      },
+      "FloatArray": {
+        "type": "float_array",
+        "default": [1.2,2.1,77.4],
+        "length": 15,
+        "values": [-100, 100]
+      }
+    }
+}

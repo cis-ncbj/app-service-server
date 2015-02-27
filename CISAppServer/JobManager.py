@@ -869,7 +869,6 @@ class JobManager(object):
             self.__time_stamp = datetime.utcnow()
 
             # Execute loop
-            self.report_jobs()
             if self.__queue_running:  # Do not process queue in pause state
                 self.check_new_jobs()
             self.check_running_jobs()
@@ -881,6 +880,7 @@ class JobManager(object):
                 self.check_old_jobs()
                 #if conf.log_level == 'DEBUG' or conf.log_level == 'VERBOSE':
                 #    self.report_jobs()
+                self.report_jobs()
                 _n = 0
             self.check_finished_threads()
             self.check_deleted_jobs()
@@ -889,7 +889,6 @@ class JobManager(object):
                 if not StateManager.check_commit():
                     self.shutdown()
             StateManager.poll_gw()
-            self.report_jobs()
             _n += 1
 
         #_stat = open("/tmp/AppServer.profile","w")
@@ -965,11 +964,17 @@ def worker_submit(job_ids):
             logger.log(VERBOSE, 'Job flagged to wait for input.')
             continue
         except ValidatorError as e:
-            _job.die("@worker_submit - Job %s validation failed." % _job.id(),
-                     exc_info=True, err=False, exit_code=ExitCodes.Validate)
+            # Error in job input detected log a warning
+            if conf.log_level < logging.DEBUG:
+                _job.die("@worker_submit - Job validation failed: %s" % e.message,
+                         err=False, exit_code=ExitCodes.Validate)
+            else:
+                _job.die("@worker_submit - Job validation failed: %s" % e.message,
+                         exc_info=True, err=False, exit_code=ExitCodes.Validate)
             continue
         except:
-            _job.die("@worker_submit - Job %s validation failed." % _job.id(),
+            # Unhandled exception log an error
+            _job.die("@worker_submit - Job validation failed.",
                      exc_info=True, exit_code=ExitCodes.Validate)
             continue
 
@@ -978,7 +983,7 @@ def worker_submit(job_ids):
         try:
             _scheduler = SchedulerStore[_job.status.scheduler]
         except:
-            logger.error("Unable to obtain scheduler and "
+            _job.die("Unable to obtain scheduler and "
                          "service instance.", exc_info=True)
             continue
         # Ask scheduler to generate scripts and submit the job

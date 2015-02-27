@@ -1,0 +1,10 @@
+{
+  "api" : 1.0,
+  "service": "basic",
+  "input" : {
+      "SLEEP": 30,
+      "Int": 100,
+      "_1Float": -20.1,
+      "_2Float": 99.2
+  }
+}

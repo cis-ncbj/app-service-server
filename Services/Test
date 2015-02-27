@@ -15,13 +15,13 @@
             "values" : [0,1000]
         },
         // Nominator
-        "1Float" : {
+        "Float1" : {
             "type" : "float",
             "default" : 1.0,
             "values" : [-100,100]
         },
         // Denominator
-        "2Float" : {
+        "Float2" : {
             "type" : "float",
             "default" : 20.99,
             "values" : [-100,100]

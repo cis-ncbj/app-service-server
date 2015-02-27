@@ -1,0 +1,178 @@
+{
+  "config": {
+    "job_size": 3000,
+    "quota" : 300000
+  },
+  "sets": {
+    "PBS" : {
+        "CIS_SCHEDULER":"pbs",
+        "CIS_QUEUE" :"i12h"
+    }
+  },
+  "variables":{
+    "start_case": {
+      "default" : "20150120 120000",
+      "type": "datetime",
+      "values" : "%Y%m%d %H%M%S"
+    },
+    "end_case": {
+      "default" : "20150122 090000",
+      "type": "datetime",
+      "values" : "%Y%m%d %H%M%S"
+    },
+    "output_period": {
+      "default" : "900",
+      "type": "string",
+      "values" : ["900","1800","3600"]
+    },
+    "output_type": {
+      "default" : 1,
+      "type": "int",
+      "values" : [1,7]
+    },
+    "age_classes":{
+      "type": "int_array",
+      "default": [7200,999999],
+      "length" : 10,
+      "values": [1, 999999]
+    },
+    "vertical_levels":{
+      "type": "float_array",
+      "default": [100.0,1000.0, 20000.0],
+      "length": 10,
+      "values": [1,  100000]
+    },
+    "emissions":{
+      "type": "object_array",
+      "default": [],
+      "values": [10,{
+        "start": {
+          "default" : "20150120 130000",
+          "type": "datetime",
+          "values" : "%Y%m%d %H%M%S"
+        },
+        "end": {
+          "default" : "20150120 190000",
+          "type": "datetime",
+          "values" : "%Y%m%d %H%M%S"
+        },
+        "ll_lon":{
+          "type":"float",
+          "default": 0.0,
+          "values" : [-180,180]
+        },
+        "ll_lat":{
+          "type":"float",
+          "default": 0.0,
+          "values" : [-180,180]
+        },
+        "ur_lon":{
+          "type":"float",
+          "default": 0.0,
+          "values" : [-180,180]
+        },
+        "ur_lat":{
+          "type":"float",
+          "default": 0.0,
+          "values" : [-180,180]
+        },
+        "uz":{
+          "type":"float",
+          "default": 10.0,
+          "values" : [1,10000]
+        },
+        "lz":{
+          "type":"float",
+          "default": 1.0,
+          "values" : [0,10000]
+        },
+        "npart":{
+          "type":"int",
+          "default": 6000,
+          "values" : [30,200000]
+        },
+        "masses":{
+          "type":"float_array",
+          "default": [1000.0],
+          "values" : [10,0,10000000]
+        },
+        "nr":{
+          "type":"int",
+          "default": 1,
+          "values" : [1,10]
+        }
+      }]
+    },
+    "species":{
+      "type": "object_array",
+      "default": [],
+      "values": [10,{
+        "name" : {
+          "type": "string",
+          "default": "AIRTRACER",
+          "values": ["AIRTRACER", "AS-CO", "CO", "Cs-137", "DRY_TRAC", "EU-CO", "G-HCH", "H2O2", "HCHO", "HNO2", "HNO3", "HNO3", "I-131", "I2-131", "Kr-85", "NA-CO", "NH3", "NO", "NO2", "NO2TRACER", "NO3-aero", "O3", "PAN", "PCB101", "PCB180", "PCB28", "Ru-106", "SO2", "SO2TRACER", "SO4-aero", "Sr-90", "WET_TRAC", "Xe-133", "Y-91"]
+        },
+        "decaytime":{
+          "type":"float",
+          "default": -999.9,
+          "values" : [-1.0e+3,1000000000]
+        },
+        "wetscava":{
+          "type":"float",
+          "default": -9.9E-9,
+          "values" : [-9.9E-9,1E-04]
+        },
+        "wetsb":{
+          "type":"float",
+          "default": 0.0,
+          "values" : [0.0,1.0]
+        },
+        "drydif":{
+          "type":"float",
+          "default": -9.9,
+          "values" : [-9.9,10.0]
+        },
+        "dryhenry":{
+          "type":"float",
+          "default": 0.0,
+          "values" : [0.0,1.0e+16]
+        },
+        "drya":{
+          "type":"float",
+          "default": -0.1,
+          "values" : [-0.1,1.0]
+        },
+        "partrho":{
+          "type":"float",
+          "default": -9.9E+9,
+          "values" : [-9.9E+9,10000]
+        },
+        "partmean":{
+          "type":"float",
+          "default": 0.0,
+          "values" : [0.0,1.0E-6]
+        },
+        "partsig":{
+          "type":"float",
+          "default": 0.0,
+          "values" : [0.0,1]
+        },
+        "dryvelo":{
+          "type":"float",
+          "default": -9.99,
+          "values" : [-9.99,100]
+        },
+        "weight":{
+          "type":"float",
+          "default": 29.00,
+          "values" : [-9.99,999.99]
+        },
+        "oh_react":{
+          "type":"float",
+          "default": -9.9E-09,
+          "values" : [-9.9E-09,1E-10]
+        }
+      }]
+    }
+  }
+}

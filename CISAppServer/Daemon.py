@@ -272,7 +272,7 @@ class DaemonRunner(object):
     def _restart(self):
         """ Stop, then start. """
         self._stop()
-        time.sleep(1)
+        time.sleep(conf.config_sleep_time*2)
         self._start()
 
     def _reload(self):

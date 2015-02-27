@@ -73,10 +73,6 @@ class Config(dict):
         #: Timeout for jobs with wait flag in seconds (Job with wait flag will
         #  be ignored when processing the waiting queue)
         self.config_wait_time = 120
-        #: Enabled schedulers
-        self.config_schedulers = ('pbs', 'ssh')
-        #: Default scheduler
-        self.service_scheduler = 'pbs'
         #: Maximum number of all active jobs
         self.config_max_jobs = 1000
         #: Number of jobs to be batched together for submit/finalise threads
@@ -194,6 +190,10 @@ class Config(dict):
         self.service_reserved_keys = (
             'CIS_SCHEDULER', 'CIS_QUEUE', 'CIS_SSH_HOST'
         )
+        #: Enabled schedulers
+        self.service_schedulers = ('pbs', 'ssh')
+        #: Default scheduler
+        self.service_default_scheduler = 'pbs'
         #: Default user name for job execution
         self.service_username = 'apprunner'
         #: Default job minimum lifetime in hours (supports fractions). Jobs
@@ -217,6 +217,9 @@ class Config(dict):
         self.service_job_size = 50
         #: Default scheduler
         self.service_scheduler = 'pbs'
+        #: Limit of nested Object type variables
+        #: should prevent from endless recursive validation
+        self.service_max_nesting_level = 1
         #: Path to the shared storage used as communication medium with
         #: AppGateway
         self.gate_path_shared = 'Shared'
