@@ -53,8 +53,6 @@ class Scheduler(object):
         self.work_path = None
         #: Path where submitted job IDs are stored
         self.queue_path = None
-        #: Default queue
-        self.default_queue = None
         #: Maximum number of concurrent jobs
         self.max_jobs = None
         #: Jinja2 environment configuration
@@ -415,8 +413,6 @@ class PbsScheduler(Scheduler):
         self.work_path = conf.pbs_path_work
         #: Path where submitted PBS job IDs are stored
         self.queue_path = conf.pbs_path_queue
-        #: Default PBS queue
-        self.default_queue = conf.pbs_default_queue
         #: Maximum number of concurent jobs
         self.max_jobs = conf.pbs_max_jobs
         #: Scheduler name
@@ -452,7 +448,7 @@ class PbsScheduler(Scheduler):
         _run_script = os.path.join(_work_dir, "pbs.sh")
         _output_log = os.path.join(_work_dir, "output.log")
         # Select queue
-        _queue = self.default_queue
+        _queue = Services.ServiceStore[job.status.service].config['queue']
         if job.data.data['CIS_QUEUE'] != "":
             _queue = job.data.data['CIS_QUEUE']
 
@@ -717,7 +713,7 @@ class SshScheduler(Scheduler):
         """
 
         # Select execution host
-        _queue = self.default_queue
+        _queue = Services.ServiceStore[job.status.service].config['queue']
         if job.data.data['CIS_SSH_HOST'] != "":
             _queue = job.data.data['CIS_SSH_HOST']
 

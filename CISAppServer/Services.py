@@ -123,6 +123,7 @@ class Validator(object):
 
         job.status.service = _data['service']
         _service = ServiceStore[_data['service']]
+        job.status.scheduler = _service.config['scheduler']
 
         # Make sure that input dictionary exists
         if 'input' not in _data.keys():
@@ -152,10 +153,6 @@ class Validator(object):
             _k: _v['default'] for _k, _v in
             _service.variables.items()
         }
-        _variables.update({
-            _k: _v['default'] for _k, _v in
-            ServiceStore['default'].variables.items()
-        })
 
         # Load sets
         for _k, _v in _data['input'].items():
@@ -587,7 +584,9 @@ class Service(dict):
             'max_jobs': conf.service_max_jobs,
             'quota': conf.service_quota,
             'job_size': conf.service_job_size,
-            'username': conf.service_username
+            'username': conf.service_username,
+            'scheduler': conf.service_default_scheduler,
+            'queue': SchedulerStore[conf.service_default_scheduler].default_queue
         }
         # Load settings from config file
         self.config.update(data['config'])

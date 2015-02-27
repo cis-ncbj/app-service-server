@@ -45,8 +45,8 @@ class JobManager(object):
         # Make sure state manager is initialized
         StateManager.init()
         # Initialize schedulers and services
-        ServiceStore.init()
         SchedulerStore.init()
+        ServiceStore.init()
 
         # Main loop run guard
         self.__running = True
