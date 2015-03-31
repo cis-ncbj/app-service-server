@@ -64,7 +64,7 @@
         // Clean execution set
         "CleanSet" : {
             "TestName" : "CleanRun",
-            "CIS_QUEUE" : "test_slc6",
+            "CIS_QUEUE" : "a12h",
             "COMMAND" : "/bin/ls",
             "PBS_OPTS" : "",
             "SLEEP" : 1
@@ -72,7 +72,7 @@
         // Failed execution set
         "FailSet" : {
             "TestName" : "FailRun",
-            "CIS_QUEUE" : "test_slc6",
+            "CIS_QUEUE" : "a12h",
             "COMMAND" : "/bin/ls NieIstniejącyPlik",
             "PBS_OPTS" : "",
             "SLEEP" : 1
@@ -80,23 +80,23 @@
         // Long execution set
         "LongSet" : {
             "TestName" : "LongRun",
-            "CIS_QUEUE" : "test_slc6",
+            "CIS_QUEUE" : "a12h",
             "COMMAND" : "/bin/ls",
             "PBS_OPTS" : "",
             "SLEEP" : 5,
-            "1Float" : 22.5,
-            "2Float" : 39.67
+            "Float1" : 22.5,
+            "Float2" : 39.67
         },
         // Stuck in queue set
         "WaitSet" : {
             "TestName" : "WaitRun",
-            "CIS_QUEUE" : "test_slc6",
+            "CIS_QUEUE" : "a12h",
             "COMMAND" : "/bin/ls",
             "PBS_OPTS" : "",
             "PBS_SLEEP_TAG" : "PBS -a",
             "SLEEP" : 1,
-            "1Float" : -12.5,
-            "2Float" : 9.66
+            "Float1" : -12.5,
+            "Float2" : 9.66
         }
     }
 }
