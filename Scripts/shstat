@@ -38,8 +38,6 @@ done
 # The PIDs are stored in *.id files
 # The exit codes are stored in *.dat files
 DIR=/tmp/$USER/shpool
-# PID file pattern - do not expand * here
-PATTERN=$DIR'/*.dat'
 
 if [ ! -d $DIR ]
 then
@@ -50,7 +48,10 @@ fi
 ps -u $USER -o pid | grep -v PID | awk '{print $1" -1"}'
 
 # Print finished processes
-cat $PATTERN
+if test -n "$(find $DIR -maxdepth 1 -name '*.dat' -print -quit)"
+then
+    cat $DIR/*.dat
+fi
 
 # Remove info about processes finished more than an hour ago
 find $DIR -name "*.dat" -type f -mmin +60 | sed 's/\.dat/\.id/' | xargs rm -f
