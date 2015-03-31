@@ -31,13 +31,13 @@ class JobManager(object):
 
     def __init__(self):
         """
-        Upon initialization stes up Validator and Sheduler interfaces.
+        Upon initialization sets up Validator and Scheduler interfaces.
         """
         self.init()
 
     def init(self):
         """
-        Initialize JobManager. Creates new instaces of Validator and
+        Initialize JobManager. Creates new instances of Validator and
         Schedulers. Loads existing jobs from file system.
 
         Existing state is purged.
@@ -58,11 +58,11 @@ class JobManager(object):
         self.__last_service_size = {}
         # Warning counter - quota
         self.__w_counter_quota = {}
-        for _s in ServiceStore.keys():
+        for _s in ServiceStore:
             self.__w_counter_quota[_s] = 0
         # Warning counter - slots
         self.__w_counter_slots = {}
-        for _s in ServiceStore.keys():
+        for _s in ServiceStore:
             self.__w_counter_slots[_s] = 0
         # Time stamp for the last iteration
         self.__time_stamp = datetime.utcnow()
@@ -142,7 +142,7 @@ class JobManager(object):
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
-        _service_jobs = { _key : 0 for _key in ServiceStore.keys() }
+        _service_jobs = { _key : 0 for _key in ServiceStore }
         for (_count, _key) in _counters:
             _service_jobs[_key] = _count
 
@@ -602,7 +602,7 @@ class JobManager(object):
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
-        _service_usage = { _key : 0 for _key in ServiceStore.keys() }
+        _service_usage = { _key : 0 for _key in ServiceStore }
         _service_quota = { _key : _service.config['quota'] \
                 for _key, _service in ServiceStore.items() }
         for (_count, _key) in _counters:
@@ -965,7 +965,7 @@ def worker_submit(job_ids):
             continue
         except ValidatorError as e:
             # Error in job input detected log a warning
-            if conf.log_level < logging.DEBUG:
+            if logger.getEffectiveLevel() > logging.DEBUG:
                 _job.die("@worker_submit - Job validation failed: %s" % e.message,
                          err=False, exit_code=ExitCodes.Validate)
             else:

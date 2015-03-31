@@ -347,7 +347,7 @@ class Job(Base):
             raise Exception("Inconsistent job IDs: %s != %s" % (job_state.id, job_id))
 
         _service = None
-        for _name in Services.ServiceStore.keys():
+        for _name in Services.ServiceStore:
             if job_id.startswith(_name):
                 _service = _name
         if _service is None:
@@ -944,7 +944,7 @@ class StateManager(object):
             session = self.session
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore.keys():
+        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
@@ -952,7 +952,7 @@ class StateManager(object):
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s", state)
             return
-        if service is not None and service not in Services.ServiceStore.keys():
+        if service is not None and service not in Services.ServiceStore:
             logger.error("@StateManager - Unknown service: %s", service)
             return
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
@@ -1032,7 +1032,7 @@ class StateManager(object):
         _job_count = -1
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore.keys():
+        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
@@ -1040,7 +1040,7 @@ class StateManager(object):
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s", state)
             return _job_count
-        if service is not None and service not in Services.ServiceStore.keys():
+        if service is not None and service not in Services.ServiceStore:
             logger.error("@StateManager - Unknown service: %s", service)
             return _job_count
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
@@ -1085,12 +1085,12 @@ class StateManager(object):
         _job_count = -1
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore.keys():
+        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
             return _job_count
-        if service is not None and service not in Services.ServiceStore.keys():
+        if service is not None and service not in Services.ServiceStore:
             logger.error("@StateManager - Unknown service: %s", service)
             return _job_count
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
@@ -1128,12 +1128,12 @@ class StateManager(object):
         _job_count = []
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore.keys():
+        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
             return _job_count
-        if service is not None and service not in Services.ServiceStore.keys():
+        if service is not None and service not in Services.ServiceStore:
             logger.error("@StateManager - Unknown service: %s", service)
             return _job_count
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
@@ -1178,7 +1178,7 @@ class StateManager(object):
         _job_count = []
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore.keys():
+        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
@@ -1229,7 +1229,7 @@ class StateManager(object):
         _quota_count = []
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore.keys():
+        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
@@ -1266,7 +1266,7 @@ class StateManager(object):
             session = self.session
 
         # Input validation
-        if service != 'all' and service not in Services.ServiceStore.keys():
+        if service != 'all' and service not in Services.ServiceStore:
             raise Exception("@StateManager - Unknown service %s." % service)
         if flag <= 0 or flag > JobState.FLAG_ALL:
             raise Exception("Unknown flag: %s" % flag)

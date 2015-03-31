@@ -53,6 +53,8 @@ class Scheduler(object):
         self.work_path = None
         #: Path where submitted job IDs are stored
         self.queue_path = None
+        #: Default queue
+        self.default_queue = None
         #: Maximum number of concurrent jobs
         self.max_jobs = None
         #: Jinja2 environment configuration
@@ -413,6 +415,8 @@ class PbsScheduler(Scheduler):
         self.work_path = conf.pbs_path_work
         #: Path where submitted PBS job IDs are stored
         self.queue_path = conf.pbs_path_queue
+        #: Default PBS queue
+        self.default_queue = conf.pbs_default_queue
         #: Maximum number of concurent jobs
         self.max_jobs = conf.pbs_max_jobs
         #: Scheduler name
@@ -449,7 +453,7 @@ class PbsScheduler(Scheduler):
         _output_log = os.path.join(_work_dir, "output.log")
         # Select queue
         _queue = Services.ServiceStore[job.status.service].config['queue']
-        if job.data.data['CIS_QUEUE'] != "":
+        if 'CIS_QUEUE' in job.data.data:
             _queue = job.data.data['CIS_QUEUE']
 
         try:
@@ -577,7 +581,7 @@ class PbsScheduler(Scheduler):
         for _job in jobs:
             _pbs_id = str(_job.scheduler.id)
             # Check if the job exists in the PBS
-            if _pbs_id not in _job_states.keys():
+            if _pbs_id not in _job_states:
                 _job.die('@PBS - Job %s does not exist in the PBS', _job.id())
             else:
                 # Update job progress output
@@ -694,7 +698,7 @@ class SshScheduler(Scheduler):
         #: Default SSH execute host
         self.default_queue = conf.ssh_default_queue
         # @TODO actually use this setting
-        #: Dict of maximum number of concurent jobs per execution host
+        #: Dict of maximum number of concurrent jobs per execution host
         self.max_jobs = conf.ssh_max_jobs
         #: Scheduler name
         self.name = "ssh"
@@ -714,7 +718,7 @@ class SshScheduler(Scheduler):
 
         # Select execution host
         _queue = Services.ServiceStore[job.status.service].config['queue']
-        if job.data.data['CIS_SSH_HOST'] != "":
+        if 'CIS_SSH_HOST' in job.data.data:
             _queue = job.data.data['CIS_SSH_HOST']
 
         # Check that maximum job limit is not exceeded
@@ -791,7 +795,7 @@ class SshScheduler(Scheduler):
         for _job in jobs:
             _service = Services.ServiceStore[_job.status.service]
             _usr = _service.config['username']
-            if _usr not in _users.keys():
+            if _usr not in _users:
                 _users[_usr] = []
             _queue = _job.scheduler.queue
             if _queue not in _users[_usr]:
@@ -844,7 +848,7 @@ class SshScheduler(Scheduler):
             _pid = str(_job.scheduler.id)
             logger.log(VERBOSE, "Check job: %s - %s", _job.id(), _job.scheduler.id)
             # Check if the job exists on a SSH execution host
-            if _pid not in _job_states.keys():
+            if _pid not in _job_states:
                 _job.die('@SSH - Job %s does not exist on any of the SSH '
                          'execution hosts' % _job.id())
             else:
@@ -934,23 +938,33 @@ class SshScheduler(Scheduler):
     def __get_ssh_connection(self, host_name, user_name):
         _login = "%s@%s" % (user_name, host_name)
         self.lock.acquire()
-        if _login in self.hosts.keys():
+        if _login in self.hosts:
             self.lock.release()
             return self.hosts[_login]
         else:
             try:
                 logger.log(VERBOSE, "Create new SSH connection.")
-                _ssh = spur.SshShell(  # Assume default private key is valid
-                                       hostname=host_name,
-                                       username=user_name,
-                                       # Workaround for paramiko not understanding host ecdsa keys.
-                                       # @TODO If possible disable such keys on sshd at host and
-                                       # remove this from production code.
-                                       missing_host_key=spur.ssh.MissingHostKey.accept,
-                                       # Hack to speedup connection setup - use a minimal known_hosts file - requires a patch for spur
-                                       #known_hosts_file=conf.ssh_known_hosts
-                                       # What patch?
-                )
+                try:
+                    _ssh = spur.SshShell(  # Assume default private key is valid
+                                           hostname=host_name,
+                                           username=user_name,
+                                           # Workaround for paramiko not understanding host ecdsa keys.
+                                           # @TODO If possible disable such keys on sshd at host and
+                                           # remove this from production code.
+                                           missing_host_key=spur.ssh.MissingHostKey.accept,
+                                           # Hack to speedup connection setup - use a minimal known_hosts file - requires a patch for spur
+                                           # Patch in Scripts directory
+                                           known_hosts_file=conf.ssh_known_hosts
+                    )
+                except NameError:  # Fallback when spur is not patched
+                    _ssh = spur.SshShell(  # Assume default private key is valid
+                                           hostname=host_name,
+                                           username=user_name,
+                                           # Workaround for paramiko not understanding host ecdsa keys.
+                                           # @TODO If possible disable such keys on sshd at host and
+                                           # remove this from production code.
+                                           missing_host_key=spur.ssh.MissingHostKey.accept
+                    )
                 self.hosts[_login] = _ssh
                 # Establish the connection
                 _comm = ["/bin/hostname", ]
@@ -970,7 +984,7 @@ class SchedulerStore(dict):
         # in JSON format.
         logger.debug('Initializing schedulers.')
 
-        for _scheduler in conf.config_schedulers:
+        for _scheduler in conf.service_schedulers:
             if _scheduler == 'pbs':
                 self[_scheduler] = PbsScheduler()
             elif _scheduler == 'ssh':

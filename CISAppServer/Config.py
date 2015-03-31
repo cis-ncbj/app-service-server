@@ -311,7 +311,7 @@ class Config(dict):
 
         # Override logger settings
         if self.log_level is not None:
-            for _key in self.log_config['handlers'].keys():
+            for _key in self.log_config['handlers']:
                 if _key != 'mail':
                     self.log_config['handlers'][_key]['level'] = self.log_level
                 if _key == 'file' and \
@@ -319,11 +319,11 @@ class Config(dict):
                     self.log_config['handlers'][_key]['formatter'] = 'debug'
             self.log_config['root']['level'] = self.log_level
         if self.log_output is not None and \
-           'file' in self.log_config['handlers'].keys():
+           'file' in self.log_config['handlers']:
             self.log_config['handlers']['file']['filename'] = \
                 self.log_output
         if not self.log_email:
-            if 'mail' in self.log_config['handlers'].keys():
+            if 'mail' in self.log_config['handlers']:
                 del self.log_config['handlers']['mail']
             if 'mail' in self.log_config['root']['handlers']:
                 self.log_config['root']['handlers'].remove('mail')
@@ -414,9 +414,9 @@ class Config(dict):
             "gate_path_aborted",
             "gate_path_killed",
         ]
-        if 'pbs' in self.config_schedulers:
+        if 'pbs' in self.service_schedulers:
             _mkdirs.extend(("pbs_path_queue", "pbs_path_work"))
-        if 'ssh' in self.config_schedulers:
+        if 'ssh' in self.service_schedulers:
             _mkdirs.extend(("ssh_path_queue", "ssh_path_work"))
         for _path in _mkdirs:
             if not os.path.isdir(self[_path]):

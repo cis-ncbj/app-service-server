@@ -1,0 +1,28 @@
+diff -u spur/ssh.py /usr/local/lib/python2.7/dist-packages/spur/ssh.py
+--- spur/ssh.py	2014-04-16 23:58:54.000000000 +0200
++++ /usr/local/lib/python2.7/dist-packages/spur/ssh.py	2014-11-05 15:40:28.528420437 +0100
+@@ -46,12 +46,14 @@
+             port=22,
+             private_key_file=None,
+             connect_timeout=None,
+-            missing_host_key=None):
++            missing_host_key=None,
++            known_hosts_file=None):
+         self._hostname = hostname
+         self._port = port
+         self._username = username
+         self._password = password
+         self._private_key_file = private_key_file
++        self._known_hosts_file = known_hosts_file
+         self._client = None
+         self._connect_timeout = connect_timeout if not None else _ONE_MINUTE
+         self._closed = False
+@@ -194,7 +196,7 @@
+             if self._closed:
+                 raise RuntimeError("Shell is closed")
+             client = paramiko.SSHClient()
+-            client.load_system_host_keys()
++            client.load_system_host_keys(self._known_hosts_file)
+             client.set_missing_host_key_policy(self._missing_host_key)
+             client.connect(
+                 hostname=self._hostname,

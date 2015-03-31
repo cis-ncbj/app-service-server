@@ -1,7 +1,7 @@
 # Test suite for Scheduler module
 import shutil
 
-from Schedulers import conf, Scheduler
+from Schedulers import conf, Scheduler, SchedulerStore
 from Jobs import Job
 from nose.tools import eq_, ok_, raises
 import os
@@ -16,11 +16,14 @@ def setup_module():
     test_assets = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets')
     # adapt config for testing purposes
     conf.gate_path_jobs = os.path.join(test_assets, 'payloads')
+    conf.service_path_conf = os.path.join(test_assets, 'services')
     conf.service_path_data = os.path.join(test_assets, 'services','Data')
+    SchedulerStore.init()
+    ServiceStore.init()
     # add testing services to services list
-    for _service in ['test', 'default', 'basic']:
-        with open(os.path.join(test_assets, 'services', _service+'.json')) as _f:
-            ServiceStore[_service] = Service(_service, conf.json_load(_f))
+    #for _service in ['test', 'default', 'basic']:
+    #    with open(os.path.join(test_assets, 'services', _service+'.json')) as _f:
+    #        ServiceStore[_service] = Service(_service, conf.json_load(_f))
 
 def check_file(file_name,valid_lines):
     with open(file_name) as _f:

@@ -14,7 +14,9 @@ from datetime import datetime
 
 from yapsy.PluginManager import PluginManager
 
-import Jobs  # Import full module - resolves circular dependencies
+# Import full modules - resolves circular dependencies
+import Jobs
+import Schedulers
 from Config import conf, VERBOSE
 
 
@@ -115,8 +117,8 @@ class Validator(object):
 
         # Check if data contains service attribute and that such service was
         # initialized
-        if 'service' not in _data.keys() or \
-                _data['service'] not in ServiceStore.keys() or \
+        if 'service' not in _data or \
+                _data['service'] not in ServiceStore or \
                 _data['service'] == 'default':
             raise ValidatorError("Not supported service: %s." %
                                  _data['service'])
@@ -126,13 +128,13 @@ class Validator(object):
         job.status.scheduler = _service.config['scheduler']
 
         # Make sure that input dictionary exists
-        if 'input' not in _data.keys():
+        if 'input' not in _data:
             _data['input'] = {}
         elif not isinstance(_data['input'], dict):
             raise ValidatorError("The 'input' section is not a dictionary")
 
         # Make sure API level is correct
-        if 'api' not in _data.keys():
+        if 'api' not in _data:
             raise ValidatorError("Job did not specify API level.")
         if not self.validate_float(['api'], _data['api'],
                                    self.api_min, self.api_max):
@@ -143,7 +145,7 @@ class Validator(object):
             job.set_flag(Jobs.JobState.FLAG_OLD_API)
 
         # Make sure no unsupported sections were passed
-        for _k in _data.keys():
+        for _k in _data:
             if _k not in conf.service_allowed_sections:
                 raise ValidatorError("Section '%s' is not allowed in job "
                                      "definition." % _k)
@@ -156,7 +158,7 @@ class Validator(object):
 
         # Load sets
         for _k, _v in _data['input'].items():
-            if _k in _service.sets.keys():
+            if _k in _service.sets:
                 if isinstance(_v, str) or isinstance(_v, unicode):
                     # Value specified as string - check the format using python
                     # builtin conversion
@@ -183,7 +185,7 @@ class Validator(object):
             if _k in conf.service_reserved_keys or _k.startswith('CIS_CHAIN'):
                 raise ValidatorError(
                     "The '%s' variable name is restricted." % _k)
-            elif _k in _service.variables.keys():
+            elif _k in _service.variables:
                 _variables[_k] = _v
             else:
                 raise ValidatorError(
@@ -192,7 +194,7 @@ class Validator(object):
         # Check that all attribute names are defined in service configuration
         # Validate values of the attributes
         for _k, _v in _variables.items():
-            if _k in _service.variables.keys():
+            if _k in _service.variables:
                 _variables[_k] = self.validate_value(
                     [_k], _v, _service.variables[_k])
                 logger.debug(
@@ -201,7 +203,7 @@ class Validator(object):
             # Check for possible reserved attribute names like service, name,
             # date
             elif _k in conf.service_reserved_keys:
-                _variables[_k] = self.validate_value(_k, _v,
+                _variables[_k] = self.validate_value([_k], _v,
                                                      ServiceStore['default'].variables[_k])
                 logger.debug(
                     "Value passed validation: %s = %s", _k, _v
@@ -211,31 +213,29 @@ class Validator(object):
 
         # Validate job output chaining. Check if defined job IDs point to
         # existing jobs in 'done' state.
-        if 'chain' in _data.keys():
+        if 'chain' in _data:
             if not isinstance(_data['chain'], list) and \
                     not isinstance(_data['chain'], tuple):
                 raise ValidatorError("The 'chain' section is not a list")
 
-            if not self.validate_chain(_data['chain']):
-                raise ValidatorError("Bad job chain IDs.")
-            else:
-                _chain = []
-                # Generate keywords for script substitutions
-                _i = 0
-                for _id in _data['chain']:
-                    _variables["CIS_CHAIN%s" % _i] = _id
-                    _i += 1
-                    _chain.append(Jobs.JobChain(id=_id))
-                logger.debug(
-                    "Job chain IDs passed validation: %s" %
-                    _data['chain']
-                )
-                job.chain = _chain
+            self.validate_chain(_data['chain'])
+
+            _chain = []
+            # Generate keywords for script substitutions
+            _i = 0
+            for _id in _data['chain']:
+                _variables["CIS_CHAIN%s" % _i] = _id
+                _i += 1
+                _chain.append(Jobs.JobChain(id=_id))
+            logger.debug(
+                "Job chain IDs passed validation: %s" %
+                _data['chain']
+            )
+            job.chain = _chain
 
         # Job scheduler
-        if 'CIS_SCHEDULER' not in _variables.keys():
-            raise ValidatorError("Job did not define a scheduler")
-        job.status.scheduler = _variables['CIS_SCHEDULER']
+        if 'CIS_SCHEDULER' in _variables:
+            job.status.scheduler = _variables['CIS_SCHEDULER']
 
         # Update job data with default values
         job.data = Jobs.JobData(data=_variables)
@@ -291,7 +291,7 @@ class Validator(object):
             if value not in _variable_allowed_values:
                 raise ValidatorError(
                     "%s = %s - Value not in the white list (%s)." %
-                    (value, ".".join(path), _variable_allowed_values))
+                    (".".join(path), value, _variable_allowed_values))
             return value
         elif _variable_type == 'int':
             try:
@@ -426,7 +426,7 @@ class Validator(object):
                 raise ValidatorError(
                     "The attribute '%s' name of object '%s' is restricted." %
                     (_k, ".".join(path)))
-            elif _k in template.keys():
+            elif _k in template:
                 # Validate value using reccurence
                 _inner_variables[_k] = self.validate_value(
                     path + [_k],
@@ -586,7 +586,7 @@ class Service(dict):
             'job_size': conf.service_job_size,
             'username': conf.service_username,
             'scheduler': conf.service_default_scheduler,
-            'queue': SchedulerStore[conf.service_default_scheduler].default_queue
+            'queue': Schedulers.SchedulerStore[conf.service_default_scheduler].default_queue
         }
         # Load settings from config file
         self.config.update(data['config'])
@@ -621,6 +621,9 @@ class ServiceStore(dict):
                 continue
             with open(_file_name) as _f:
                 _data = conf.json_load(_f)
+            # Check if name of the service was specified. Use filename otherwise
+            if "name" in _data:
+                _service = _data["name"]
             self[_service] = Service(_service, _data)
 
             logger.info("Initialized service: %s", _service)

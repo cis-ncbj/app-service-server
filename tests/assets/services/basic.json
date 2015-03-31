@@ -1,5 +1,6 @@
 {
-    "config" : {},
+    "name": "basic",
+    "config": {},
     "sets": {},
     "variables" : {
       // Sleep interval
