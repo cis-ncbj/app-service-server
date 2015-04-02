@@ -759,19 +759,11 @@ class SshScheduler(Scheduler):
             _comm = [_shsub, "-i", job.id(), "-d", _work_dir, "-o",
                      _output_log, _run_script]
             logger.log(VERBOSE, "@SSH - Running command: %s", _comm)
-            _result = _ssh.run(_comm, allow_error=True)
-            _output = _result.output
-            logger.log(VERBOSE, _output)
+            # Submit the job. Will rise exception if shsub would return an error
+            _result = _ssh.run(_comm)
+            logger.log(VERBOSE, [_result.output, _result.stderr_output])
             # Hopefully shsub returned meaningful job ID
-            _ssh_id = _output.strip()
-            # Check return code. If ssh was not killed by signal Popen will
-            # not rise an exception
-            if _result.return_code != 0:
-                raise OSError((
-                    _result.return_code,
-                    "shsub returned non zero exit code.\n%s" %
-                    str(_output)
-                ))
+            _ssh_id = _result.output.strip()
         except:
             job.die("@SSH - Unable to submit job %s." % job.id(), exc_info=True)
             return False
@@ -818,17 +810,10 @@ class SshScheduler(Scheduler):
                     _ssh = self.__get_ssh_connection(_queue, _usr)
                     _opts = [_shstat, ]
                     logger.log(VERBOSE, "@SSH - Running command: %s", _opts)
-                    _result = _ssh.run(_opts, allow_error=True)
+		    # Run shstat. Will rise exception if shstat would return an error
+                    _result = _ssh.run(_opts)
                     _output = _result.output
-                    logger.log(VERBOSE, _output)
-                    # Check return code. If ssh was not killed by signal Popen
-                    # will not rise an exception
-                    if _result.return_code != 0:
-                        raise OSError((
-                            _result.return_code,
-                            "shstat returned non zero exit code.\n%s" %
-                            str(_output)
-                        ))
+                    logger.log(VERBOSE, [_output, _result.stderr_output])
                 except:
                     logger.error("@SSH - Unable to check jobs state.",
                                  exc_info=True)
@@ -918,10 +903,8 @@ class SshScheduler(Scheduler):
         _opts = [_shdel, _pid]
         logger.log(VERBOSE, "@SSH - Running command: %s", _opts)
         _result = _ssh.run(_opts, allow_error=True)
-        _output = _result.output
-        logger.log(VERBOSE, _output)
-        # Check return code. If ssh was not killed by signal Popen will
-        # not rise an exception
+        logger.log(VERBOSE, [_result.output, _result.stderr_output])
+        # Check return code. If == 1 the job has already finished and we do not raise an exception
         if _result.return_code == 1:
             logger.debug("Job %s already finished.", job.id())
             return
@@ -929,7 +912,7 @@ class SshScheduler(Scheduler):
             raise OSError((
                 _result.return_code,
                 "shdel returned non zero exit code.\n%s" %
-                str(_output)
+                str([_result.output, _result.stderr_output])
             ))
 
         # Mark as killed by user
@@ -956,7 +939,7 @@ class SshScheduler(Scheduler):
                                            # Patch in Scripts directory
                                            known_hosts_file=conf.ssh_known_hosts
                     )
-                except NameError:  # Fallback when spur is not patched
+                except TypeError:  # Fallback when spur is not patched
                     _ssh = spur.SshShell(  # Assume default private key is valid
                                            hostname=host_name,
                                            username=user_name,
