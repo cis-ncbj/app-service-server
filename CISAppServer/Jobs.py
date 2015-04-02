@@ -12,6 +12,7 @@ from subprocess import Popen, PIPE, STDOUT
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.mutable import Mutable
+from sqlalchemy.pool import Pool
 from sqlalchemy import event, create_engine, func
 from sqlalchemy.orm import relationship, backref, sessionmaker, deferred, \
         joinedload, Session
@@ -106,7 +107,7 @@ class JobState(Base):
     #: Job exit message
     exit_message = deferred(Column(String))
     #: Job exit state
-    exit_state = Column(Integer)
+    exit_state = Column(String)
     #: Job exit code
     exit_code = deferred(Column(Integer))
     #: Time when job was submitted
@@ -235,6 +236,22 @@ def delete_job_state(mapper, connection, target):
 @event.listens_for(Session, 'before_flush')
 def flush_session(thissession, flush_context, instances):
     logger.log(VERBOSE, "Flush of the ORM state to DB")
+
+# Workaround for postgres dropping connections
+@event.listens_for(Pool, "checkout")
+def ping_connection(dbapi_connection, connection_record, connection_proxy):
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("SELECT 1")
+    except:
+        # optional - dispose the whole pool
+        # instead of invalidating one at a time
+        # connection_proxy._pool.dispose()
+
+        # raise DisconnectionError - pool will try
+        # connecting again up to three times before raising.
+        raise exc.DisconnectionError()
+    cursor.close()
 
 
 class JobData(Base):
@@ -708,11 +725,13 @@ class StateManager(object):
                 _log_levels[conf.log_level_db])
         logging.getLogger('sqlalchemy.orm').setLevel(
                 _log_levels[conf.log_level_db])
+        logging.getLogger('sqlalchemy.pool').setLevel(
+                _log_levels[conf.log_level_db])
         #: DB engine
         self.engine = create_engine(conf.config_db)
         # Enforce foreign keys in SQLite
-        self.engine.execute('pragma foreign_keys=on')
-        self.engine.execute('pragma journal_mode=WAL')
+        #self.engine.execute('pragma foreign_keys=on')
+        #self.engine.execute('pragma journal_mode=WAL')
         #: Session factory
         self.session_factory = sessionmaker()
         self.session_factory.configure(bind=self.engine)
