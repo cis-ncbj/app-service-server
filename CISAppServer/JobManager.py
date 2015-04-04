@@ -93,8 +93,14 @@ class JobManager(object):
         StateManager.expire_session()
 
         if self.__terminate:
+            _job_list = []
+            try:
+                _job_list = StateManager.get_job_list("closing")
+            except:
+                logger.error('Unable to contact with the DB.', exc_info=True)
+
             # Force killed state on leftovers
-            for _job in StateManager.get_job_list():
+            for _job in _job_list:
                 _state = _job.get_state()
                 if _state in ('done', 'failed', 'aborted', 'killed'):
                     continue
@@ -450,7 +456,13 @@ class JobManager(object):
 
         logger.log(VERBOSE, '@JManager - Check for delete requests.')
 
-        for _job in StateManager.get_job_list(flag=JobState.FLAG_DELETE):
+        try:
+            _job_list = StateManager.get_job_list(flag=JobState.FLAG_DELETE)
+        except:
+            logger.error('Unable to contact with the DB.', exc_info=True)
+            return
+
+        for _job in _job_list:
             _jid = _job.id()
             logger.debug('@JManager - Detected job marked for deletion: %s' %
                          _jid)
@@ -499,7 +511,13 @@ class JobManager(object):
 
         logger.log(VERBOSE, '@JManager - Check for expired jobs.')
 
-        for _job in StateManager.get_job_list():
+        try:
+            _job_list = StateManager.get_job_list()
+        except:
+            logger.error('Unable to contact with the DB.', exc_info=True)
+            return
+
+        for _job in _job_list:
             # Skip jobs already flagged for removal
             if _job.get_flag(JobState.FLAG_DELETE):
                 continue
@@ -646,6 +664,12 @@ class JobManager(object):
                       )
 
             _job_table = []  # List of tuples (lifetime, job)
+            _job_list = []
+            try:
+                _job_list = StateManager.get_job_list()
+            except:
+                logger.error('Unable to contact with the DB.', exc_info=True)
+
             for _job in StateManager.get_job_list(service=_service_name):
                 _jid = _job.id()
                 if _job.get_flag(JobState.FLAG_DELETE):
@@ -782,7 +806,13 @@ class JobManager(object):
 
         # Kill running, queued and waiting jobs
         if self.__terminate:
-            for _job in StateManager.get_job_list():
+            _job_list = []
+            try:
+                _job_list = StateManager.get_job_list()
+            except:
+                logger.error('Unable to contact with the DB.', exc_info=True)
+
+            for _job in _job_list:
                 _state = _job.get_state()
                 if _state in ('queued', 'running'):
                     _scheduler = SchedulerStore[_job.status.scheduler]

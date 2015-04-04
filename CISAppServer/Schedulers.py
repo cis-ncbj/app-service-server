@@ -785,13 +785,19 @@ class SshScheduler(Scheduler):
         # Extract list of user names and queues associated to the jobs
         _users = {}
         for _job in jobs:
-            _service = Services.ServiceStore[_job.status.service]
-            _usr = _service.config['username']
-            if _usr not in _users:
-                _users[_usr] = []
-            _queue = _job.scheduler.queue
-            if _queue not in _users[_usr]:
-                _users[_usr].append(_queue)
+            try:
+                _service = Services.ServiceStore[_job.status.service]
+                _usr = _service.config['username']
+                if _usr not in _users:
+                    _users[_usr] = []
+                # TODO rewrite to get an array JID -> queue from SchedulerQueue table with single SELECT
+                _queue = _job.scheduler.queue
+                if _queue not in _users[_usr]:
+                    _users[_usr].append(_queue)
+            except:
+                logger.error("Error while gathering user list.",
+                             exc_info=True)
+                return
 
         # We agregate the jobs by user. This way one shstat call per user is
         # required instead of on call per job
