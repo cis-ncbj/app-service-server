@@ -211,8 +211,10 @@ class DaemonRunner(object):
 
             self.job_manager.run()
         except Exception:
-            logger.error(u"@Daemon - Shutdown, exception cought.",
+            logger.error(u"Shutdown, exception cought.",
                          exc_info=True)
+            self.job_manager.clear()
+            logger.info(u"Shutdown complete.")
             logging.shutdown()
             sys.exit(1)
 

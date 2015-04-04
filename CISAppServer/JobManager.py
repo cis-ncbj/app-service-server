@@ -82,15 +82,33 @@ class JobManager(object):
         self.__thread_list_cleanup = []
 
     def clear(self):
+        logger.debug("Closing subprocesses")
         self.__thread_pool_submit.close()
         self.__thread_pool_cleanup.close()
         self.__thread_pool_submit.join()
         self.__thread_pool_cleanup.join()
         self.__thread_pool_submit = None
         self.__thread_pool_cleanup = None
+        logger.debug("Subprocesses closed")
+        StateManager.expire_session()
+
+        if self.__terminate:
+            # Force killed state on leftovers
+            for _job in StateManager.get_job_list():
+                _state = _job.get_state()
+                if _state in ('done', 'failed', 'aborted', 'killed'):
+                    continue
+                else:
+                    _job.finish('Server shutdown', state='killed',
+                                exit_code=ExitCodes.Shutdown)
+                    _job.exit()
+
+        # Pass the final state to AppGw
+        StateManager.check_commit()
         StateManager.clear()
         ServiceStore.clear()
         SchedulerStore.clear()
+
 
     def check_new_jobs(self):
         """
@@ -783,27 +801,7 @@ class JobManager(object):
         self.check_cleanup()
         time.sleep(conf.config_shutdown_time)
 
-        logger.debug("Closing subprocesses")
-        self.__thread_pool_submit.close()
-        self.__thread_pool_cleanup.close()
-        self.__thread_pool_submit.join()
-        self.__thread_pool_cleanup.join()
-        StateManager.expire_session()
-        logger.debug("Subprocesses closed")
-
-        if self.__terminate:
-            # Force killed state on leftovers
-            for _job in StateManager.get_job_list():
-                _state = _job.get_state()
-                if _state in ('done', 'failed', 'aborted', 'killed'):
-                    continue
-                else:
-                    _job.finish('Server shutdown', state='killed',
-                                exit_code=ExitCodes.Shutdown)
-                    _job.exit()
-
-        # Pass the final state to AppGw
-        StateManager.check_commit()
+        self.clear()
 
         logger.info("Shutdown complete")
         logging.shutdown()
