@@ -15,11 +15,14 @@ import threading
 
 from subprocess import Popen, PIPE, STDOUT
 
+from jinja2 import Environment, FileSystemLoader, Template
+
+from sqlalchemy.exc import SQLAlchemyError
+
 import Services  # Import full module - resolves circular dependencies
 import Jobs  # Import full module - resolves circular dependencies
 from Config import conf, VERBOSE, ExitCodes
-
-from jinja2 import Environment, FileSystemLoader, Template
+from Tools import rollback
 
 logger = logging.getLogger(__name__)
 
@@ -524,6 +527,7 @@ class PbsScheduler(Scheduler):
         logger.info("Job successfully submitted: %s", job.id())
         return True
 
+    @rollback(SQLAlchemyError)
     def update(self, jobs):
         """
         Update job states to match their current state in PBS queue.
@@ -579,6 +583,7 @@ class PbsScheduler(Scheduler):
 
         # Iterate through jobs
         for _job in jobs:
+            # TODO rewrite to get an array JID -> queue from SchedulerQueue table with single SELECT
             _pbs_id = str(_job.scheduler.id)
             # Check if the job exists in the PBS
             if _pbs_id not in _job_states:
@@ -776,6 +781,7 @@ class SshScheduler(Scheduler):
         logger.info("Job successfully submitted: %s", job.id())
         return True
 
+    @rollback(SQLAlchemyError)
     def update(self, jobs):
         """
         Update job states to match their current state on SSH execution host.
@@ -785,19 +791,14 @@ class SshScheduler(Scheduler):
         # Extract list of user names and queues associated to the jobs
         _users = {}
         for _job in jobs:
-            try:
-                _service = Services.ServiceStore[_job.status.service]
-                _usr = _service.config['username']
-                if _usr not in _users:
-                    _users[_usr] = []
-                # TODO rewrite to get an array JID -> queue from SchedulerQueue table with single SELECT
-                _queue = _job.scheduler.queue
-                if _queue not in _users[_usr]:
-                    _users[_usr].append(_queue)
-            except:
-                logger.error("Error while gathering user list.",
-                             exc_info=True)
-                return
+            _service = Services.ServiceStore[_job.status.service]
+            _usr = _service.config['username']
+            if _usr not in _users:
+                _users[_usr] = []
+            # TODO rewrite to get an array JID -> queue from SchedulerQueue table with single SELECT
+            _queue = _job.scheduler.queue
+            if _queue not in _users[_usr]:
+                _users[_usr].append(_queue)
 
         # We agregate the jobs by user. This way one shstat call per user is
         # required instead of on call per job
@@ -823,7 +824,7 @@ class SshScheduler(Scheduler):
                 except:
                     logger.error("@SSH - Unable to check jobs state.",
                                  exc_info=True)
-                    return
+                    continue
 
                 for _line in _output.splitlines():
                     try:
@@ -836,6 +837,7 @@ class SshScheduler(Scheduler):
 
         # Iterate through jobs
         for _job in jobs:
+            # TODO rewrite to get an array JID -> queue from SchedulerQueue table with single SELECT
             _pid = str(_job.scheduler.id)
             logger.log(VERBOSE, "Check job: %s - %s", _job.id(), _job.scheduler.id)
             # Check if the job exists on a SSH execution host

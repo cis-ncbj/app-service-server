@@ -346,7 +346,10 @@ class JobManager(object):
                              "scheduler queue" % _state)
 
             # Ask the scheduler to run the update
-            _scheduler.update(_jobs_active)
+            try:
+                _scheduler.update(_jobs_active)
+            except:
+                logger.error('Error occured while updating job states.', exc_info=True)
 
     def check_cleanup(self):
         """

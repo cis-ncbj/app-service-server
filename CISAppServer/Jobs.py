@@ -23,25 +23,10 @@ from sqlalchemy import Column, Integer, String, DateTime, PickleType, ForeignKey
 import Services # Import full module - resolves circular dependencies
 import Schedulers # Import full module - resolves circular dependencies
 from Config import conf, VERBOSE, ExitCodes
+from Tools import rollback
 
 
 logger = logging.getLogger(__name__)
-
-# Rollback decorator for StataManager DB calls
-# How do I issue rollback for correct session?
-# Check kw=session??
-# Connection lost gives DatabaseError
-def rollback(exception_to_check):
-    def rollback(f, *args, **kw):
-        try:
-            return f(*args, **kw)
-        except exception_to_check as e:
-            session = StateManager.session
-            if "session" in kw:
-                session = kw["session"]
-            session.rollback()
-            raise
-    return decorator(rollback)
 
 
 class UnicodeBase(object):
@@ -792,7 +777,7 @@ class StateManager(object):
             session = self.session
         session.expire_all()
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def commit(self, session=None):
         """
         Commit changes to the DB. Invalidates SQLAlchemy ORM instances.
@@ -834,7 +819,7 @@ class StateManager(object):
 
         return _commit
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def flush(self, session=None):
         """
         Flush changes to the DB transaction. The data are not persisted (or
@@ -923,7 +908,7 @@ class StateManager(object):
         self.commit(session)
         session.merge(job)
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def get_job(self, job_id, session=None):
         """
         Get Job object from the job queue.
@@ -950,7 +935,7 @@ class StateManager(object):
         """
         raise NotImplementedError
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def get_job_list(self, state="all", service=None, scheduler=None,
             flag=None, session=None):
         """
@@ -1005,7 +990,7 @@ class StateManager(object):
         # Execute query
         return _q.all()
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def get_job_list_byid(self, ids, session=None, full=False):
         """
         Get a list of jobs that are in a selected state.
@@ -1039,7 +1024,7 @@ class StateManager(object):
         # Execute query
         return _q.all()
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def get_job_count(self, state="all", service=None, scheduler=None,
                       flag=None, session=None):
         """
@@ -1097,7 +1082,7 @@ class StateManager(object):
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def get_active_job_count(self, service=None, scheduler=None, flag=None,
                       session=None):
         """
@@ -1142,7 +1127,7 @@ class StateManager(object):
 
         return _job_count
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def get_job_state_counters(self, service=None, scheduler=None, flag=None, session=None):
         """
         Get a count of jobs that are in a selected state.
@@ -1193,7 +1178,7 @@ class StateManager(object):
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def get_active_service_counters(self, scheduler=None, flag=None, session=None):
         """
         Get a count of jobs that are in a selected state.
@@ -1245,7 +1230,7 @@ class StateManager(object):
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _job_count
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def get_quota_service_counters(self, scheduler=None, flag=None, session=None):
         """
         Get a size of quota used by jobs per service.
@@ -1289,7 +1274,7 @@ class StateManager(object):
             logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
             return _quota_count
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def remove_flags(self, flag, service='all', session=None):
         """
         Clear flags for jobs that belong to selected service.
@@ -1326,7 +1311,7 @@ class StateManager(object):
         #    JobState.flags_dirty: JobState.flags_dirty &= ~flag
         #    }, sychronize_session='fetch')
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def delete_job(self, job, session=None):
         '''
         Remove all job persistant data. Except for the output directory.
@@ -1345,7 +1330,7 @@ class FileStateManager(StateManager):
         self.attach_job(_job, session)
         return _job
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def get_new_job_list(self):
         logger.log(VERBOSE, u"@FileStateManager - Query job requests")
 
@@ -1375,7 +1360,7 @@ class FileStateManager(StateManager):
 
         return _jobs
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def commit(self, session=None):
         logger.log(VERBOSE, "@FileStateManager: Push status changes to AppGW.")
         if session is None:
@@ -1410,7 +1395,7 @@ class FileStateManager(StateManager):
 
         super(FileStateManager, self).commit(session)
 
-    @rollback([SQLAlchemyError])
+    @rollback(SQLAlchemyError)
     def poll_gw(self, session=None):
         logger.log(VERBOSE, u"@FileStateManager: Poll AppGW for status changes.")
         if session is None:
