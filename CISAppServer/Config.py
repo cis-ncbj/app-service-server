@@ -35,6 +35,33 @@ class ExitCodes:
         range(-100, -93)
 
 
+class CISFormatter(logging.Formatter):
+
+    err_fmt  = "%(levelname)7s %(asctime)s [%(threadName)s:%(filename)s:%(lineno)s - %(funcName)s()] :\n%(message)s"
+
+    def __init__(self, fmt="%(levelno)s: %(msg)s"):
+        logging.Formatter.__init__(self, fmt)
+
+
+    def format(self, record):
+
+        # Save the original format configured by the user
+        # when the logger formatter was instantiated
+        format_orig = self._fmt
+
+        # Replace the original format with one customized by logging level
+        if record.levelno == logging.ERROR:
+            self._fmt = CISFormatter.err_fmt
+
+        # Call the original formatter class to do the grunt work
+        result = logging.Formatter.format(self, record)
+
+        # Restore the original format configured by the user
+        self._fmt = format_orig
+
+        return result
+
+
 class Config(dict):
     """
     Class responsible for configuration storage and initialization.
@@ -103,6 +130,7 @@ class Config(dict):
                 'verbose': {
                     'format':
                     '%(levelname)7s %(asctime)s : %(message)s',
+                    '()': CISFormatter,
                     #'datefmt': '%m-%d %H:%M:%S',
                 },
                 'debug': {
@@ -123,7 +151,7 @@ class Config(dict):
                 'mail': {
                     'level': 'ERROR',
                     'class': 'logging.handlers.SMTPHandler',
-                    'formatter': 'verbose',
+                    'formatter': 'debug',
                     'mailhost': 'localhost',
                     'fromaddr': 'kklimaszewski@cis.gov.pl',
                     'toaddrs': self.log_email,

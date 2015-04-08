@@ -745,8 +745,7 @@ class StateManager(object):
         self.session_factory_noflush.configure(bind=self.engine)
         #: DB session handle
         self.session = self.session_factory()
-        # Create the tables in the DB
-        #TODO what if the DB exists?
+        # Create the tables in the DB (creation is skipped if tables exist)
         Base.metadata.create_all(self.engine)
         self.commit()
         logger.debug("StateManager initialized")
@@ -1078,12 +1077,7 @@ class StateManager(object):
         if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         # Execute query
-        #@TODO move try upper in the stack
-        try:
-            return _q.count()
-        except:
-            logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
-            return _job_count
+        return _q.count()
 
     @rollback(SQLAlchemyError)
     def get_active_job_count(self, service=None, scheduler=None, flag=None,
@@ -1175,12 +1169,7 @@ class StateManager(object):
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         _q = _q.group_by(JobState.state)
         # Execute query
-        #@TODO move try upper in the stack
-        try:
-            return _q.all()
-        except:
-            logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
-            return _job_count
+        return _q.all()
 
     @rollback(SQLAlchemyError)
     def get_active_service_counters(self, scheduler=None, flag=None, session=None):
@@ -1228,12 +1217,7 @@ class StateManager(object):
                 (JobState.state == 'cleanup'))
         _q = _q.group_by(JobState.service)
         # Execute query
-        #@TODO move try upper in the stack
-        try:
-            return _q.all()
-        except:
-            logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
-            return _job_count
+        return _q.all()
 
     @rollback(SQLAlchemyError)
     def get_quota_service_counters(self, scheduler=None, flag=None, session=None):
@@ -1273,12 +1257,7 @@ class StateManager(object):
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         _q = _q.group_by(JobState.service)
         # Execute query
-        #@TODO move try upper in the stack
-        try:
-            return _q.all()
-        except:
-            logger.error(u"@StateManager - Unable count jobs.", exc_info=True)
-            return _quota_count
+        return _q.all()
 
     @rollback(SQLAlchemyError)
     def remove_flags(self, flag, service='all', session=None):

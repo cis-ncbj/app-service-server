@@ -145,7 +145,7 @@ class JobManager(object):
         # Available job slots
         _new_slots = conf.config_max_jobs - _active_count
 
-        logger.log(VERBOSE, '@JManager - Free job slots: %s.', _new_slots)
+        logger.log(VERBOSE, 'Free job slots: %s.', _new_slots)
 
         _stat_out = os.statvfs(conf.gate_path_output)
         _hard_quota = _stat_out.f_frsize * _stat_out.f_bavail
@@ -164,7 +164,7 @@ class JobManager(object):
         try:
             _counters = StateManager.get_active_service_counters()
         except:
-            logger.error('Unable to contact with the DB.', exc_info=True)
+            logger.error('Unable to contact the DB.', exc_info=True)
             return
         _service_jobs = { _key : 0 for _key in ServiceStore }
         for (_count, _key) in _counters:
@@ -174,7 +174,7 @@ class JobManager(object):
         try:
             _counters = StateManager.get_quota_service_counters()
         except:
-            logger.error('Unable to contact with the DB.', exc_info=True)
+            logger.error('Unable to contact the DB.', exc_info=True)
             return
         _service_quota = {
                 _key : _service.config['quota'] for \
@@ -579,7 +579,12 @@ class JobManager(object):
         Log the current queue state.
         """
 
-        _results = StateManager.get_job_state_counters()
+        try:
+            _results = StateManager.get_job_state_counters()
+        except:
+            logger.error("Unable to contact the DB.", exc_info=True)
+            return
+
         _states = { _key : 0 for _key in conf.service_states }
         for (_count, _key) in _results:
             _states[_key] = _count
@@ -639,7 +644,7 @@ class JobManager(object):
         try:
             _counters = StateManager.get_quota_service_counters()
         except:
-            logger.error('Unable to contact with the DB.', exc_info=True)
+            logger.error('Unable to contact the DB.', exc_info=True)
             return
         _service_usage = { _key : 0 for _key in ServiceStore }
         _service_quota = { _key : _service.config['quota'] \
