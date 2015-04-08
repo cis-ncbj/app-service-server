@@ -242,20 +242,22 @@ def flush_session(thissession, flush_context, instances):
     logger.log(VERBOSE, "Flush of the ORM state to DB")
 
 # Workaround for postgres dropping connections
-@event.listens_for(Pool, "checkout")
-def ping_connection(dbapi_connection, connection_record, connection_proxy):
-    cursor = dbapi_connection.cursor()
-    try:
-        cursor.execute("SELECT 1")
-    except:
-        # optional - dispose the whole pool
-        # instead of invalidating one at a time
-        # connection_proxy._pool.dispose()
-
-        # raise DisconnectionError - pool will try
-        # connecting again up to three times before raising.
-        raise exc.DisconnectionError()
-    cursor.close()
+#@event.listens_for(Pool, "checkout")
+#def ping_connection(dbapi_connection, connection_record, connection_proxy):
+#    cursor = dbapi_connection.cursor()
+#    try:
+#        logger.log(VERBOSE, "POOL CONN TEST")
+#        cursor.execute("SELECT 1")
+#    except:
+#        # optional - dispose the whole pool
+#        # instead of invalidating one at a time
+#        # connection_proxy._pool.dispose()
+#
+#        # raise DisconnectionError - pool will try
+#        # connecting again up to three times before raising.
+#        logger.log(VERBOSE, "POOL CONN DROP")
+#        raise exc.DisconnectionError()
+#    cursor.close()
 
 
 class JobData(Base):
@@ -810,7 +812,7 @@ class StateManager(object):
                 _commit = True
                 logger.debug("Commit to DB successfull.")
                 break
-            except:
+            except SQLAlchemyError as e:
                 if _i < 4:
                     logger.warning('Commit to DB failed - retry.', exc_info=True)
                 else:
@@ -1076,6 +1078,7 @@ class StateManager(object):
         if flag is not None:
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         # Execute query
+        #@TODO move try upper in the stack
         try:
             return _q.count()
         except:
@@ -1172,6 +1175,7 @@ class StateManager(object):
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         _q = _q.group_by(JobState.state)
         # Execute query
+        #@TODO move try upper in the stack
         try:
             return _q.all()
         except:
@@ -1224,6 +1228,7 @@ class StateManager(object):
                 (JobState.state == 'cleanup'))
         _q = _q.group_by(JobState.service)
         # Execute query
+        #@TODO move try upper in the stack
         try:
             return _q.all()
         except:
@@ -1268,6 +1273,7 @@ class StateManager(object):
             _q = _q.filter(JobState.flags.op('&')(flag) > 0)
         _q = _q.group_by(JobState.service)
         # Execute query
+        #@TODO move try upper in the stack
         try:
             return _q.all()
         except:
