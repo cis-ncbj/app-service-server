@@ -502,7 +502,9 @@ class JobManager(object):
             try:
                 StateManager.delete_job(_job)
             except:
+                #@TODO some limit on remove attempts?
                 logger.error("Cannot remove job %s.", _jid, exc_info=True)
+                continue
 
             logger.info('@JManager - Job %s removed with all data.' %
                         _jid)
@@ -1058,7 +1060,7 @@ def worker_cleanup(job_ids):
             else:
                 _scheduler.finalise(_job)
         except:
-            logger.error("Job %s cleanup not finished with error.",
+            logger.error("Job %s cleanup finished with error.",
                          _jid, exc_info=True)
             continue
 

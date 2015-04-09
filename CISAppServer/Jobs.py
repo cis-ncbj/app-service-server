@@ -1445,7 +1445,11 @@ class FileStateManager(StateManager):
                 os.unlink(_name)
         # Remove job file after symlinks (otherwise os.path.exists
         # fails on symlinks)
-        os.unlink(os.path.join(conf.gate_path_jobs, _jid))
+        _name = os.path.join(conf.gate_path_jobs, _jid)
+        if os.path.exists(_name):
+            os.unlink(_name)
+        else:
+            logger.warning("Job file does not exist during cleanup: %s", _name)
         # Remove time stamps
         _list = os.listdir(conf.gate_path_time)
         for _item in _list:
