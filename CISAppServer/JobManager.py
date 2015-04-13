@@ -11,6 +11,8 @@ import time
 import logging
 import threading
 import multiprocessing
+import cProfile
+
 from datetime import datetime, timedelta
 
 from Config import conf, VERBOSE, ExitCodes
@@ -82,6 +84,8 @@ class JobManager(object):
         self.__thread_list_cleanup = []
 
     def clear(self):
+        # Push not commited changes to DB and expire local cache.
+        StateManager.check_commit()
         logger.debug("Closing subprocesses")
         self.__thread_pool_submit.close()
         self.__thread_pool_cleanup.close()
@@ -90,7 +94,6 @@ class JobManager(object):
         self.__thread_pool_submit = None
         self.__thread_pool_cleanup = None
         logger.debug("Subprocesses closed")
-        StateManager.expire_session()
 
         if self.__terminate:
             _job_list = []
@@ -160,6 +163,7 @@ class JobManager(object):
             #_service_slots[_service_name] = _service.config['max_jobs'] - \
             #        _service_active_count
 
+        #TODO Add available job slots per scheduler - flag the jobs to wait
         # Available job slots per service
         try:
             _counters = StateManager.get_active_service_counters()
@@ -628,7 +632,7 @@ class JobManager(object):
                 _clean = False
                 logger.debug("Removed finished subprocess.")
         if not _clean:
-            StateManager.expire_session()
+            StateManager.check_commit()
 
     def collect_garbage(self, full=False):
         """
@@ -762,8 +766,9 @@ class JobManager(object):
             # thread can create its own instances.
 
             _thread = self.__thread_pool_submit.apply_async(
-                    func=worker_submit, args=(_job_ids,))
-            #self.__thread_list_submit.append(_thread)
+                    #func=worker_submit, args=(_job_ids,))
+                    func=worker_submit_profile, args=(_job_ids,))
+            self.__thread_list_submit.append(_thread)
             logger.debug("@JManager - Submit thread started.")
         except:
             logger.error("@JManager - Unable to start submit thread %s",
@@ -791,8 +796,9 @@ class JobManager(object):
             # thread can create its own instances.
 
             _thread = self.__thread_pool_cleanup.apply_async(
-                    func=worker_cleanup, args=(_job_ids,))
-            #self.__thread_list_cleanup.append(_thread)
+                    #func=worker_cleanup, args=(_job_ids,))
+                    func=worker_cleanup_profile, args=(_job_ids,))
+            self.__thread_list_cleanup.append(_thread)
             logger.debug("@JManager - Cleanup thread %s started.")
         except:
             logger.error("@JManager - Unable to start cleanup thread %s",
@@ -804,12 +810,9 @@ class JobManager(object):
         """
         logger.info("Starting shutdown")
 
-        # Make sure that jobs ready for cleanup start processing immediatelly
-        #StateManager.expire_session()
-        #self.check_cleanup()
-        # Wait for processing threads to finish
-        #time.sleep(conf.config_shutdown_time)
-        #StateManager.expire_session()
+        # Push to DB not commited changes and expire local cache
+        StateManager.check_commit()
+
         time.sleep(conf.config_shutdown_time)
         self.check_running_jobs()
         self.check_cleanup()
@@ -833,6 +836,8 @@ class JobManager(object):
                     except:
                         _job.die("@PBS - Unable to terminate job %s." %
                                 _job.id(), exc_info=True)
+            # Push to DB not commited changes and expire local cache
+            StateManager.check_commit()
             # Wait for PBS to kill the jobs
             time.sleep(conf.config_shutdown_time)
 
@@ -894,6 +899,7 @@ class JobManager(object):
 
             # Calculate last iteration execute time
             _exec_time = (datetime.utcnow() - self.__time_stamp).total_seconds()
+            logger.debug("Iteration time: %s", _exec_time)
             # Calculate required sleep time
             _dt = conf.config_sleep_time - _exec_time
             if _dt < 0:
@@ -922,11 +928,12 @@ class JobManager(object):
                 _n = 0
             self.check_finished_threads()
             self.check_deleted_jobs()
+            StateManager.poll_gw()
+            # Commit changes to the DB. This should expire local cache and resync it with DB on next access.
             if not StateManager.check_commit():
                 time.sleep(5)
                 if not StateManager.check_commit():
                     self.shutdown()
-            StateManager.poll_gw()
             _n += 1
 
         #_stat = open("/tmp/AppServer.profile","w")
@@ -968,6 +975,13 @@ def worker_init(config, work_id, lock):
     SchedulerStore.init()
     Validator.init()
 
+def worker_submit_profile(job_ids):
+    """
+    Profile submit worker.
+    """
+    cProfile.runctx('worker_submit(job_ids)', globals(), locals(),
+                    'submit_prof%d.prof' % os.getpid())
+
 def worker_submit(job_ids):
     """
     Generate job related scripts and submit them to selected scheduler.
@@ -986,6 +1000,7 @@ def worker_submit(job_ids):
     except:
         logger.error("Unable to connect to DB.",
                      exc_info=True)
+        #@TODO we should somehow recover from this otherwise jobs will remain in processing state forever
         return
 
     for _job in _jobs:
@@ -1030,12 +1045,21 @@ def worker_submit(job_ids):
                 if _scheduler.chain_input_data(_job):
                     if _scheduler.submit(_job):
                         _job.queue()
+                    else:
+                        _job.wait()
         except:
-            logger.error("Unable to submit job.", exc_info=True)
+            _job.die("Unable to submit job.", exc_info=True)
             continue
 
     StateManager.check_commit(_session)
     logger.debug("Job submit thread finished.")
+
+def worker_cleanup_profile(job_ids):
+    """
+    Profile cleanup worker.
+    """
+    cProfile.runctx('worker_cleanup(job_ids)', globals(), locals(),
+                    'cleanup_prof%d.prof' % os.getpid())
 
 def worker_cleanup(job_ids):
     """
@@ -1060,6 +1084,7 @@ def worker_cleanup(job_ids):
             else:
                 _scheduler.finalise(_job)
         except:
+            #TODO mark job as aborted?
             logger.error("Job %s cleanup finished with error.",
                          _jid, exc_info=True)
             continue

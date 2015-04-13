@@ -12,6 +12,7 @@ import shutil
 import logging
 import spur
 import threading
+import random
 
 from subprocess import Popen, PIPE, STDOUT
 
@@ -702,7 +703,6 @@ class SshScheduler(Scheduler):
         self.queue_path = conf.ssh_path_queue
         #: Default SSH execute host
         self.default_queue = conf.ssh_default_queue
-        # @TODO actually use this setting
         #: Dict of maximum number of concurrent jobs per execution host
         self.max_jobs = conf.ssh_max_jobs
         #: Scheduler name
@@ -966,6 +966,187 @@ class SshScheduler(Scheduler):
             return _ssh
 
 
+class DummyScheduler(Scheduler):
+    """
+    Class implementing dummy scheduler. A scheduler that does not submit jubs
+    only lies that it did.
+
+    Allows for job submission, deletion and extraction of job status.
+    """
+
+    def __init__(self):
+        super(DummyScheduler, self).__init__()
+        #: Dict of maximum number of concurrent jobs per execution host
+        self.max_jobs = conf.dummy_max_jobs
+        #: Scheduler name
+        self.name = "dummy"
+
+    def submit(self, job):
+        """
+        Submit a job to execution host via SSH queue. The "pbs.sh" script
+        should be already present in the ssh_work_path/job directory.
+
+        :param job: :py:class:`Job` instance
+        :return: True on success and False otherwise.
+        """
+        #@TODO Rewrite submit, chain_jobs, generate_scripts to throw exceptions on errors
+        logger.log(VERBOSE, "Trying to submit job %s", job.id())
+        # Check that maximum job limit is not exceeded
+        # Use exclusive session to be thread safe, no need to pass the session
+        # from JobManager
+        _job_count = -1
+        try:
+            _session = Jobs.StateManager.new_session()
+            _job_count = Jobs.StateManager.get_job_count(scheduler=self.name,
+                                                         session=_session)
+            _session.close()
+        except:
+            logger.error("Unable to connect to DB.", exc_info=True)
+        if _job_count < 0:
+            return False
+        # @TODO fix !!! self.max_jobs[_queue], check that queue is defined,
+        # otherwise use some default. What happens with the job when submit
+        # fails - switch to waiting state? What if someting is mosconfigured
+        # and it will never enter queue - max submit retries?
+        if _job_count >= self.max_jobs:
+            logger.debug("Active scheduler jobs limit reached - job will be held")
+            return False
+
+        # Store the SSH job ID
+        job.scheduler = Jobs.SchedulerQueue(scheduler=self.name, id=0, queue="default")
+        # Reduce memory footprint
+        job.compact()
+
+        logger.info("Job successfully submitted: %s", job.id())
+        return True
+
+    @rollback(SQLAlchemyError)
+    def update(self, jobs):
+        """
+        Update job states to match their current state. Sets jobs state randomly.
+
+        :param jobs: A list of Job instances for jobs to be updated.
+        """
+        # Iterate through jobs
+        for _job in jobs:
+            self.progress(_job)
+            if conf.dummy_turbo:
+                _state = 2
+            else:
+                _state = random.randint(0,2)
+            if _state == 1:
+                # Job is running
+                if _job.get_state() != 'running':
+                    try:
+                        _job.run()
+                    except:
+                        _job.die("Unable to set job state "
+                                 "(running : %s)" % _job.id(), exc_info=True)
+            elif _state == 2:
+                _new_state = 'done'
+                _msg = 'Job finished succesfully'
+                try:
+                    _job.finish(_msg, _new_state, _state)
+                except:
+                    _job.die('Unable to set job state (%s : %s)' %
+                             (_new_state, _job.id()), exc_info=True)
+
+    def stop(self, job, msg, exit_code):
+        """
+        Stop running job and remove it from SSH queue.
+
+        :param job: :py:class:`Job` instance
+        :param msg: Message that will be passed to the user
+        """
+        # Mark as killed by user
+        job.mark(msg, exit_code)
+
+    def progress(self, job):
+        """
+        Extract the job progress log and expose it to the user.
+
+        :param job: :py:class:`Job` instance
+        """
+        pass
+
+    def finalise(self, job):
+        """
+        Prepare output of finished job.
+
+        Job working directory is moved to the external_data_path directory.
+
+        :param job: :py:class:`Job` instance
+        """
+        _jid = job.id()
+        # Remove job from scheduler queue if it was queued
+        try:
+            job.scheduler = None
+        except:
+            logger.error("@Scheduler - Unable to remove job SchedulerQueue.",
+                         exc_info=True)
+
+        try:
+            # Set job exit state
+            job.exit()
+        except:
+            logger.error("@Scheduler - Unable to finalize cleanup.",
+                         exc_info=True)
+        logger.info("Job finalised: %s", _jid)
+
+    def abort(self, job):
+        """
+        Cleanup aborted job.
+
+        Removes working and output directories.
+
+        :param job: :py:class:`Job` instance
+        """
+        _jid = job.id()
+        # Remove job from scheduler queue if it was queued
+        try:
+            job.scheduler = None
+        except:
+            logger.error("@Scheduler - Unable to remove job SchedulerQueue.",
+                         exc_info=True)
+
+        logger.debug("@Scheduler - finalize cleanup: %s", _jid)
+        try:
+            # Set job exit state
+            job.exit()
+        except:
+            logger.error("@Scheduler - Unable to finalize cleanup.",
+                         exc_info=True)
+        logger.debug("@Scheduler - job abort finished: %s", _jid)
+
+    def generate_scripts(self, job):
+        """
+        Generate scripts and job input files from templates.
+
+        Will walk through service_data_path/service and copy all files
+        including recursion through subdirectories to PBS work directory for
+        specified job (the directory structure is retained). For all files
+        substitute all occurences of @@{atribute_name} with specified values.
+
+        :param job: :py:class:`Job` instance after validation
+        :return: True on success and False otherwise.
+        """
+        logger.debug('Generate sripts')
+        return True
+
+    def chain_input_data(self, job):
+        """
+        Chain output data of finished jobs as our input.
+
+        Copies output data of specified job IDs into the working directory of
+        current job.
+
+        :param job: :py:class:`Job` instance after validation
+        :return: True on success and False otherwise.
+        """
+        logger.debug('Chaining input data')
+        return True
+
+
 class SchedulerStore(dict):
     def __init__(self):
         super(SchedulerStore, self).__init__()
@@ -980,6 +1161,8 @@ class SchedulerStore(dict):
                 self[_scheduler] = PbsScheduler()
             elif _scheduler == 'ssh':
                 self[_scheduler] = SshScheduler()
+            elif _scheduler == 'dummy':
+                self[_scheduler] = DummyScheduler()
 
 
 SchedulerStore = SchedulerStore()

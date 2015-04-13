@@ -530,6 +530,7 @@ class Job(Base):
         except:
             logger.error("@Job - Unable to mark job %s for finalise step." %
                          self.id(), exc_info=True)
+            #TODO What if this would fail?
             self.status.state = 'aborted'
 
     def exit(self):
@@ -736,8 +737,8 @@ class StateManager(object):
         #: DB engine
         self.engine = create_engine(conf.config_db)
         # Enforce foreign keys in SQLite
-        #self.engine.execute('pragma foreign_keys=on')
-        #self.engine.execute('pragma journal_mode=WAL')
+        self.engine.execute('pragma foreign_keys=on')
+        self.engine.execute('pragma journal_mode=WAL')
         #: Session factory
         self.session_factory = sessionmaker()
         self.session_factory.configure(bind=self.engine)
@@ -802,6 +803,7 @@ class StateManager(object):
         :return: True if succeded, False otherwise.
         """
         _commit = False
+        _time = 0.2
 
         for _i in range(5):
             try:
@@ -811,12 +813,15 @@ class StateManager(object):
                 _commit = True
                 logger.debug("Commit to DB successfull.")
                 break
+            #TODO What about errors in GW sync for FileStateManager??
             except SQLAlchemyError as e:
                 if _i < 4:
                     logger.warning('Commit to DB failed - retry.', exc_info=True)
                 else:
                     logger.error('Unable to commit changes to DB.', exc_info=True)
-            time.sleep(0.2)
+            # Increase delay exponentialy
+            time.sleep(_time)
+            _time *= 4
 
         return _commit
 

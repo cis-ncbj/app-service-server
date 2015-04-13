@@ -198,6 +198,8 @@ class Config(dict):
                     os.path.join(os.environ["HOME"], ".ssh"),
                     "known_hosts"
                 )
+        self.dummy_max_jobs = 100  #: Maximum number of concurent Dummy jobs
+        self.dummy_turbo = False  #: Dummy scheduler turbo mode - all jobs finish instantly
         #: Path with services configuration files
         self.service_path_conf = 'Services'
         #: Path with services scripts and input files
@@ -219,7 +221,7 @@ class Config(dict):
             'CIS_SCHEDULER', 'CIS_QUEUE', 'CIS_SSH_HOST'
         )
         #: Enabled schedulers
-        self.service_schedulers = ('pbs', 'ssh')
+        self.service_schedulers = ('pbs', 'ssh', 'dummy')
         #: Default scheduler
         self.service_default_scheduler = 'pbs'
         #: Default user name for job execution

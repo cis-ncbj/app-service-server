@@ -29,6 +29,7 @@ import logging
 import logging.config
 import lockfile
 import time
+import cProfile
 
 from daemon import pidfile, DaemonContext
 
@@ -209,7 +210,9 @@ class DaemonRunner(object):
             # Instatiate job_manager
             self.job_manager = JobManager()
 
-            self.job_manager.run()
+            cProfile.runctx('self.job_manager.run()', globals(), locals(),
+                            'main_prof.prof')
+            #self.job_manager.run()
         except Exception:
             logger.error(u"Shutdown, exception cought.",
                          exc_info=True)
