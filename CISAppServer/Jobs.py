@@ -736,9 +736,9 @@ class StateManager(object):
                 _log_levels[conf.log_level_db])
         #: DB engine
         self.engine = create_engine(conf.config_db)
-        # Enforce foreign keys in SQLite
-        self.engine.execute('pragma foreign_keys=on')
-        self.engine.execute('pragma journal_mode=WAL')
+        # Execute some config statements
+        for _init in conf.config_db_init:
+            self.engine.execute(_init)
         #: Session factory
         self.session_factory = sessionmaker()
         self.session_factory.configure(bind=self.engine)

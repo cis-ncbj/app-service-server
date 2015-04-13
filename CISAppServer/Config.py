@@ -89,6 +89,7 @@ class Config(dict):
         # Define default values
         self.config_file = None  #: Config file name
         self.config_db = 'sqlite:///jobs.db'
+	self.config_db_init = ()
         #: Sleep interval in seconds between job status queries
         self.config_sleep_time = 5
         #: Every n-th status query dump the progress logs

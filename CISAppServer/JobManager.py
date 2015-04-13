@@ -114,6 +114,7 @@ class JobManager(object):
 
         # Pass the final state to AppGw
         StateManager.check_commit()
+        self.report_jobs()
         StateManager.clear()
         ServiceStore.clear()
         SchedulerStore.clear()
@@ -766,8 +767,8 @@ class JobManager(object):
             # thread can create its own instances.
 
             _thread = self.__thread_pool_submit.apply_async(
-                    #func=worker_submit, args=(_job_ids,))
-                    func=worker_submit_profile, args=(_job_ids,))
+                    func=worker_submit, args=(_job_ids,))
+                    #func=worker_submit_profile, args=(_job_ids,))
             self.__thread_list_submit.append(_thread)
             logger.debug("@JManager - Submit thread started.")
         except:
@@ -796,8 +797,8 @@ class JobManager(object):
             # thread can create its own instances.
 
             _thread = self.__thread_pool_cleanup.apply_async(
-                    #func=worker_cleanup, args=(_job_ids,))
-                    func=worker_cleanup_profile, args=(_job_ids,))
+                    func=worker_cleanup, args=(_job_ids,))
+                    #func=worker_cleanup_profile, args=(_job_ids,))
             self.__thread_list_cleanup.append(_thread)
             logger.debug("@JManager - Cleanup thread %s started.")
         except:
@@ -883,10 +884,6 @@ class JobManager(object):
         * Check for jobs exceeding their life time - mark for removal,
         * Check for jobs to be removed - delete all related resources.
         """
-
-        #import yappi
-        #yappi.start()
-
         _n = 0
         while(self.__running):
             # Reload config if requested
@@ -922,9 +919,8 @@ class JobManager(object):
             if _n >= conf.config_garbage_step:
                 self.collect_garbage()
                 self.check_old_jobs()
-                #if conf.log_level == 'DEBUG' or conf.log_level == 'VERBOSE':
-                #    self.report_jobs()
-                self.report_jobs()
+                if conf.log_level == 'DEBUG' or conf.log_level == 'VERBOSE':
+                    self.report_jobs()
                 _n = 0
             self.check_finished_threads()
             self.check_deleted_jobs()
@@ -936,10 +932,6 @@ class JobManager(object):
                     self.shutdown()
             _n += 1
 
-        #_stat = open("/tmp/AppServer.profile","w")
-        #yappi.get_func_stats().print_all(out=_stat)
-        #yappi.get_thread_stats().print_all(out=_stat)
-        #_stat.close()
         logger.debug("Main Loop End")
 
         self.shutdown()

@@ -210,9 +210,10 @@ class DaemonRunner(object):
             # Instatiate job_manager
             self.job_manager = JobManager()
 
-            cProfile.runctx('self.job_manager.run()', globals(), locals(),
-                            'main_prof.prof')
-            #self.job_manager.run()
+            # Profile main loop execution
+            #cProfile.runctx('self.job_manager.run()', globals(), locals(),
+            #                'main_prof.prof')
+            self.job_manager.run()
         except Exception:
             logger.error(u"Shutdown, exception cought.",
                          exc_info=True)

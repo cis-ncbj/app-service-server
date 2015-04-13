@@ -3,6 +3,11 @@
     // Server settings
     // ***************
     //
+    // sqlite config
+    self.config_db_init = [
+        'pragma foreign_keys=on',
+        'pragma journal_mode=WAL'
+    ],
     // Sleep interval in seconds between job status queries (dafault: 3)
     //"config_sleep_time" : 3,
     //
