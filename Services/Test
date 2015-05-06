@@ -36,7 +36,7 @@
         "PBS_SLEEP_TAG" : {
             "type" : "string",
             "default" : "",
-            "values" : ["", "PBS -a"]
+            "values" : ["", "PBS -a 0400"]
         },
         // PBS sleep date
         "PBS_SLEEP_VALUE" : {
@@ -83,7 +83,7 @@
             "CIS_QUEUE" : "a12h",
             "COMMAND" : "/bin/ls",
             "PBS_OPTS" : "",
-            "SLEEP" : 5,
+            "SLEEP" : 10,
             "Float1" : 22.5,
             "Float2" : 39.67
         },
@@ -93,7 +93,7 @@
             "CIS_QUEUE" : "a12h",
             "COMMAND" : "/bin/ls",
             "PBS_OPTS" : "",
-            "PBS_SLEEP_TAG" : "PBS -a",
+            "PBS_SLEEP_TAG" : "PBS -a 0400",
             "SLEEP" : 1,
             "Float1" : -12.5,
             "Float2" : 9.66
