@@ -1,5 +1,7 @@
 #!/bin/sh
+{% if CIS_QUEUE is defined %}
 #PBS -q @@{CIS_QUEUE}
+{% endif %}
 #@@{PBS_SLEEP_TAG} @@{PBS_SLEEP_VALUE}
 #@@{PBS_OPTS}
 
