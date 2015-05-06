@@ -723,6 +723,7 @@ class SshScheduler(Scheduler):
 
         # Select execution host
         _queue = Services.ServiceStore[job.status.service].config['queue']
+        _user = Services.ServiceStore[job.status.service].config['username']
         if 'CIS_SSH_HOST' in job.data.data:
             _queue = job.data.data['CIS_SSH_HOST']
 
@@ -754,9 +755,8 @@ class SshScheduler(Scheduler):
         # @TODO handle timouts etc ...
         try:
             # Submit
-            logger.debug("@SSH - Submitting new job")
+            logger.debug("@SSH - Submitting new job: %s@%s", _user, _queue)
             # Run shsub with proper user permissions
-            _user = Services.ServiceStore[job.status.service].config['username']
             _shsub = os.path.join(os.path.dirname(conf.daemon_path_installdir),
                                   "Scripts")
             _shsub = os.path.join(_shsub, "shsub")
