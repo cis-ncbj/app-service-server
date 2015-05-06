@@ -422,8 +422,9 @@ class JobManager(object):
             return
 
         for _job in _job_list:
-            logger.debug('@JManager - Detected job marked for a kill: %s' %
+            logger.debug('@JManager - Detected job marked for a kill: %s',
                          _job.id())
+            logger.log(VERBOSE, 'Job is in "%s" state', _job.get_state())
 
             # Wait for the job submission thread to finish
             if _job.get_state() == 'processing':
@@ -837,6 +838,9 @@ class JobManager(object):
                     except:
                         _job.die("@PBS - Unable to terminate job %s." %
                                 _job.id(), exc_info=True)
+                elif _state == 'waiting':
+                    _job.finish('User request', 'killed', ExitCodes.Shutdown)
+                #@TODO What with the processiong jobs
             # Push to DB not commited changes and expire local cache
             StateManager.check_commit()
             # Wait for PBS to kill the jobs
@@ -910,9 +914,10 @@ class JobManager(object):
             self.__time_stamp = datetime.utcnow()
 
             # Execute loop
+            StateManager.poll_gw()
+            self.check_running_jobs()
             if self.__queue_running:  # Do not process queue in pause state
                 self.check_new_jobs()
-            self.check_running_jobs()
             self.check_job_kill_requests()
             self.check_cleanup()
             # Do not collect garbage every iteration
@@ -924,7 +929,6 @@ class JobManager(object):
                 _n = 0
             self.check_finished_threads()
             self.check_deleted_jobs()
-            StateManager.poll_gw()
             # Commit changes to the DB. This should expire local cache and resync it with DB on next access.
             if not StateManager.check_commit():
                 time.sleep(5)
@@ -1069,17 +1073,22 @@ def worker_cleanup(job_ids):
     for _job in _jobs:
         _jid = _job.id()
 
-        try:
-            _scheduler = SchedulerStore[_job.status.scheduler]
-            if _job.get_exit_state() == 'aborted':
-                _scheduler.abort(_job)
-            else:
-                _scheduler.finalise(_job)
-        except:
-            #TODO mark job as aborted?
-            logger.error("Job %s cleanup finished with error.",
-                         _jid, exc_info=True)
-            continue
+        # Jobs killed in waiting state will not have a scheduler defined. There
+        # is no cleanup to perform either. Simply call exit ...
+        if _job.status.scheduler is None:
+            _job.exit()
+        else:
+            try:
+                _scheduler = SchedulerStore[_job.status.scheduler]
+                if _job.get_exit_state() == 'aborted':
+                    _scheduler.abort(_job)
+                else:
+                    _scheduler.finalise(_job)
+            except:
+                #TODO mark job as aborted?
+                logger.error("Job %s cleanup finished with error.",
+                             _jid, exc_info=True)
+                continue
 
     StateManager.check_commit(_session)
     logger.debug("Job cleanup thread finished.")
