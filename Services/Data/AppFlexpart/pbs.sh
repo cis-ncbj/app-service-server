@@ -3,7 +3,7 @@
 #PBS -l nodes=1:ppn=10,walltime=5:00:00
 #PBS -l mem=6GB
 
-#setenv LD_LIBRARY_PATH /mnt/opt/tools/slc6/binutils/2.22/lib:/mnt/opt/tools/slc6/netcdf/4.3.0/lib
+
 
 module load python
 module load netcdf/4.3.0-pgi
@@ -23,15 +23,30 @@ cd meteo
 python get_meteo_data.py
 cd ..
 
-echo "=====================FORMER PATHNAMES FILE===================" > flexwrf.input
-echo "$PWD/output/" >> flexwrf.input
-echo "$PWD/meteo/" >> flexwrf.input
-echo "$PWD/meteo/AVAILABLE" >> flexwrf.input
-echo "=============================================================" >> flexwrf.input
 cat input >> flexwrf.input
 
 export OMP_NUM_THREADS=10
 ulimit -s unlimited
 #limit stacksize unlimited
-pwd
 ./flexwrf31_pgi_omp flexwrf.input
+
+postprocess_scripts=/mnt/home/kgomulski/utils/ResultServer
+
+rm *.t
+rm *.dat
+rm flexwrf31_pgi_omp
+
+cd meteo
+
+rm *.nc
+
+cd ../output 
+
+
+module load python-basemap
+module load python-tools
+python $postprocess_scripts/postprocess.py
+
+tar -zcvf output.tar.gz *
+#check if there are any results
+ls -l metadata.json
