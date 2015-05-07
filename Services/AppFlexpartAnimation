@@ -1,0 +1,49 @@
+{
+  "config": {
+    "job_size": 3000,
+    "quota" : 300000
+  },
+  "sets": {
+    "PBS" : {
+        "CIS_SCHEDULER":"pbs",
+        "CIS_QUEUE" :"i12h"
+    }
+  },
+  "variables":{
+    "age": {
+      "type": "float",
+      "default": [0.0],
+      "values": [0.0, 10.0]
+    },
+    "spc": {
+      "default" : 1,
+      "type": "int",
+      "values" : [0,15]
+    },
+    "z":{
+      "type": "float",
+      "default": [0.0],
+      "values": [0.0, 10.0]
+    },
+    "min": {
+      "type": "float",
+      "default": [1.0],
+      "values": [1.0, 10000000.0]
+    },
+    "max":{
+      "type": "float",
+      "default": [10.0],
+      "values": [0.0, 10000000.0]
+    },
+    "scale":  {
+      "default" : "log",
+      "type": "string",
+      "values" : ["log","linear"]
+    }, 
+    "format": {
+      "default" : "mp4",
+      "type": "string",
+      "values" : ["mp4","gif"]
+    }
+  }
+}

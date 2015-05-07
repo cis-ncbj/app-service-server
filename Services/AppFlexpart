@@ -33,7 +33,7 @@
     "age_classes":{
       "type": "int_array",
       "default": [7200,999999],
-      "length" : 10,
+      "length": 10,
       "values": [1, 999999]
     },
     "vertical_levels":{
@@ -45,7 +45,8 @@
     "emissions":{
       "type": "object_array",
       "default": [],
-      "values": [10,{
+      "length": 10,
+      "values": {
         "start": {
           "default" : "20150120 130000",
           "type": "datetime",
@@ -89,24 +90,26 @@
         "npart":{
           "type":"int",
           "default": 6000,
-          "values" : [30,200000]
+          "values" : [1,9999999]
         },
         "masses":{
           "type":"float_array",
           "default": [1000.0],
-          "values" : [10,0,10000000]
+          "length": 10,
+          "values" : [0,10000000]
         },
         "nr":{
           "type":"int",
           "default": 1,
           "values" : [1,10]
         }
-      }]
+      }
     },
     "species":{
       "type": "object_array",
       "default": [],
-      "values": [10,{
+      "length": 10,
+      "values": {
         "name" : {
           "type": "string",
           "default": "AIRTRACER",
@@ -172,7 +175,7 @@
           "default": -9.9E-09,
           "values" : [-9.9E-09,1E-10]
         }
-      }]
+      }
     }
   }
 }
