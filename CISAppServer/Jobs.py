@@ -305,7 +305,7 @@ class SchedulerQueue(Base):
     #: Foreign key (links to Job)
     job_key = Column(Integer, ForeignKey('jobs.key'))
     #: Scheduler job ID
-    id = Column(Integer)
+    id = Column(String)
     #: Scheduler
     scheduler = Column(String)
     #: Queue
