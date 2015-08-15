@@ -1,10 +1,13 @@
 #!/bin/bash
 
+#module load python-tornado
+module load python-basemap
 module load python-tools
+
+
 
 server=/mnt/home/kgomulski/utils/
 export PATH=$PATH:$server/ffmpeg
-export PYTHONPATH=$PYTHONPATH:/mnt/home/kgomulski/tools/python-tornado/lib/python2.7/site-packages
 postprocess_scripts=$server/ResultServer
 
 python $postprocess_scripts/animation.py \
