@@ -88,8 +88,12 @@ class Config(dict):
 
         # Define default values
         self.config_file = None  #: Config file name
+        # DB URL in a sqlalchemy format. http://docs.sqlalchemy.org/en/latest/core/engines.html#database-urls
         self.config_db = 'sqlite:///jobs.db'
+        # List of SQL statements to send to the DB on init. Mainly to set some pragmas
         self.config_db_init = ()
+        # Time in second after which connection pool recycles. This should prevent lost connections to MySQL which closes them by default after 8 hours.
+        self.config_db_recycle = 3600
         #: Sleep interval in seconds between job status queries
         self.config_sleep_time = 5
         #: Every n-th status query dump the progress logs

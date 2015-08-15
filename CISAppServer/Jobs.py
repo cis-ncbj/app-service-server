@@ -18,7 +18,8 @@ from sqlalchemy.pool import Pool
 from sqlalchemy import event, create_engine, func
 from sqlalchemy.orm import relationship, backref, sessionmaker, deferred, \
         joinedload, Session
-from sqlalchemy import Column, Integer, String, DateTime, PickleType, ForeignKey
+from sqlalchemy.orm.exc import NoResultFound
+from sqlalchemy import Column, BigInteger, Integer, String, DateTime, PickleType, ForeignKey
 
 import Services # Import full module - resolves circular dependencies
 import Schedulers # Import full module - resolves circular dependencies
@@ -101,17 +102,17 @@ class JobState(Base):
     #: Foreign key (links to Job)
     #job_key = Column(Integer)
     #: Job unique identifier
-    id = Column(String, unique=True)
+    id = Column(String(255), unique=True)
     #: Current job state
-    state = Column(String)
+    state = Column(String(20))
     #: Jobs' Service
-    service = Column(String)
+    service = Column(String(100))
     #: Jobs' Scheduler
-    scheduler = Column(String)
+    scheduler = Column(String(20))
     #: Job exit message
-    exit_message = deferred(Column(String))
+    exit_message = deferred(Column(String(500)))
     #: Job exit state
-    exit_state = Column(String)
+    exit_state = Column(String(20))
     #: Job exit code
     exit_code = deferred(Column(Integer))
     #: Time when job was submitted
@@ -235,7 +236,7 @@ def set_job_state_flags(target, value, oldvalue, initiator):
 # Listeners to "delete" event for JobState instances. Call the cleanup.
 @event.listens_for(JobState, 'after_delete')
 def delete_job_state(mapper, connection, target):
-    StateManager.cleanup(target)
+    StateManager.cleanup(target.id)
 
 @event.listens_for(Session, 'before_flush')
 def flush_session(thissession, flush_context, instances):
@@ -289,7 +290,7 @@ class JobChain(Base):
     #: Foreign key (links to Job)
     job_key = Column(Integer, ForeignKey('jobs.key'))
     #: Id of Job chained as input
-    id = Column(String)
+    id = Column(String(255))
 
 
 class SchedulerQueue(Base):
@@ -305,11 +306,11 @@ class SchedulerQueue(Base):
     #: Foreign key (links to Job)
     job_key = Column(Integer, ForeignKey('jobs.key'))
     #: Scheduler job ID
-    id = Column(String)
+    id = Column(String(255))
     #: Scheduler
-    scheduler = Column(String)
+    scheduler = Column(String(20))
     #: Queue
-    queue = Column(String)
+    queue = Column(String(20))
 
 
 class Job(Base):
@@ -332,7 +333,7 @@ class Job(Base):
     #: Primary key - autoincrement
     key = Column(Integer, primary_key=True)
     #: Job output size in bytes
-    size = deferred(Column(Integer))
+    size = deferred(Column(BigInteger))
     # Data stored in related tables. We use the relationship to make sure
     # related rows will be removed when job is removed
     # Specify explicitly foreign key for JobState. We do not want to use the
@@ -472,6 +473,10 @@ class Job(Base):
         """ Mark job as in cleanup state. """
         self.__set_state('cleanup')
 
+    def close(self):
+        """ Mark job as in closing state. """
+        self.__set_state('closing')
+
     def delete(self):
         """ Mark job for removal. """
         self.set_flag(JobState.FLAG_DELETE)
@@ -503,7 +508,7 @@ class Job(Base):
             :param exit_code: one of :py:class:`ExitCodes`.
         """
         self.__set_exit_state(message, state, exit_code)
-        self.__set_state('closing')
+        self.close()
 
     def die(self, message, exit_code=ExitCodes.Abort,
             err=True, exc_info=False):
@@ -735,7 +740,7 @@ class StateManager(object):
         logging.getLogger('sqlalchemy.pool').setLevel(
                 _log_levels[conf.log_level_db])
         #: DB engine
-        self.engine = create_engine(conf.config_db)
+        self.engine = create_engine(conf.config_db, pool_recycle=conf.config_db_recycle)
         # Execute some config statements
         for _init in conf.config_db_init:
             self.engine.execute(_init)
@@ -1385,7 +1390,6 @@ class FileStateManager(StateManager):
 
         super(FileStateManager, self).commit(session)
 
-    @rollback(SQLAlchemyError)
     def poll_gw(self, session=None):
         logger.log(VERBOSE, u"@FileStateManager: Poll AppGW for status changes.")
         if session is None:
@@ -1408,8 +1412,12 @@ class FileStateManager(StateManager):
 
         #@TODO set flag in one query ??
         for _id in _list:
-            _job = self.get_job(_id)
-            _job.set_flag(JobState.FLAG_STOP)
+            try:
+                _job = self.get_job(_id)
+                _job.set_flag(JobState.FLAG_STOP)
+            except NoResultFound as e:
+                logger.error('Job %s not found in the DB. Will remove.' % _id, exc_info=True)
+                self.cleanup(_id)
         logger.log(VERBOSE, u"@FileStateManager: Jobs flagged for kill.")
 
         # Delete flags
@@ -1420,7 +1428,7 @@ class FileStateManager(StateManager):
             logger.error(u"@FileStateManager - Unable to read directory: %s." %
                          _path, exc_info=True)
             return
-        logger.log(VERBOSE, u"@FileStateManager: Obtained job delete flags.")
+        logger.log(VERBOSE, u"@FileStateManager: Obtained job delete flags: %s", _list)
 
         for _job in self.get_job_list(flag=JobState.FLAG_DELETE):
             if _job.id() in _list:
@@ -1428,19 +1436,23 @@ class FileStateManager(StateManager):
 
         #@TODO set flag in one query ??
         for _id in _list:
-            _job = self.get_job(_id)
-            _job.set_flag(JobState.FLAG_DELETE)
+            try:
+                _job = self.get_job(_id)
+                _job.set_flag(JobState.FLAG_DELETE)
+            except NoResultFound as e:
+                logger.error('Job %s not found in the DB. Will remove.' % _id, exc_info=True)
+                self.cleanup(_id)
         logger.log(VERBOSE, u"@FileStateManager: Jobs flagged for delete.")
 
-    def cleanup(self, status):
+    def cleanup(self, id):
         """
         Cleanup after job removal.
 
         Removes the flags and other files representing job state.
 
-        :param status: JobState instance
+        :param id: JobID
         """
-        _jid = status.id
+        _jid = id
 
         logger.log(VERBOSE, u"@FileStateManager: Job cleanup (%s)", _jid)
         # Remove job symlinks
