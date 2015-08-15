@@ -636,6 +636,35 @@ class JobManager(object):
         if not _clean:
             StateManager.check_commit()
 
+    def check_stuck_jobs(self):
+        """
+        Check for jobs in processing and cleanup states. If found when
+        AppServer is starting they have to be reset to waiting and closing
+        states as otherwise nothing will tuch them. When we are starting no
+        worker is present that was supposed to take care of those jobs.
+        """
+        try:
+            _job_list = StateManager.get_job_list("cleanup")
+        except:
+            logger.error('Unable to contact with the DB.', exc_info=True)
+            return
+
+        logger.debug("Found %s jobs stuck in closing state", len(_job_list))
+        for _job in _job_list:
+            _job.close()
+
+        try:
+            _job_list = StateManager.get_job_list("processing")
+        except:
+            logger.error('Unable to contact with the DB.', exc_info=True)
+            return
+
+        logger.debug("Found %s jobs stuck in processing state", len(_job_list))
+        for _job in _job_list:
+            _job.wait()
+
+        StateManager.check_commit()
+
     def collect_garbage(self, full=False):
         """
         Check if service quota is not exceeded. If yes remove oldest finished
@@ -889,6 +918,10 @@ class JobManager(object):
         * Check for jobs to be removed - delete all related resources.
         """
         _n = 0
+
+        # Recover jobs stuck in processing and cleanup states
+        self.check_stuck_jobs()
+
         while(self.__running):
             # Reload config if requested
             if self.__reload_config:
@@ -914,7 +947,11 @@ class JobManager(object):
             self.__time_stamp = datetime.utcnow()
 
             # Execute loop
-            StateManager.poll_gw()
+            try:
+                StateManager.poll_gw()
+            except:
+                logger.error("Unable to poll GW.",
+                             exc_info=True)
             self.check_running_jobs()
             if self.__queue_running:  # Do not process queue in pause state
                 self.check_new_jobs()
