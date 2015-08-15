@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# Script directory
+BASEDIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Env
+export KRB5CCNAME
+source /opt/tools/python-devel/bin/activate
+
+# Run server
+$BASEDIR/../cisapps "$@"
