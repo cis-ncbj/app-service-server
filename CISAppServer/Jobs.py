@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 """
-
+Module with implementation of Job objects and their interaction with underlying
+DB.
 """
 
 import os
@@ -21,8 +22,7 @@ from sqlalchemy.orm import relationship, backref, sessionmaker, deferred, \
 from sqlalchemy.orm.exc import NoResultFound
 from sqlalchemy import Column, BigInteger, Integer, String, DateTime, PickleType, ForeignKey
 
-import Services # Import full module - resolves circular dependencies
-import Schedulers # Import full module - resolves circular dependencies
+import Globals as G
 from Config import conf, VERBOSE, ExitCodes
 from Tools import rollback
 
@@ -49,7 +49,7 @@ class UnicodeBase(object):
             self.__class__.__name__,
             u', '.join([u'{0}={1!r}'.format(*_) for _ in items]))
 
-# Base class for SQLAlchemy ORM objects
+#: Base class for SQLAlchemy ORM objects
 Base = declarative_base(cls=UnicodeBase)
 
 
@@ -124,7 +124,7 @@ class JobState(Base):
     #: Time when wait flag was set
     wait_time = deferred(Column(DateTime))
 
-    # Flag values
+    #: Flag values
     FLAG_DELETE, FLAG_STOP, FLAG_WAIT_QUOTA, FLAG_WAIT_INPUT, FLAG_OLD_API, \
         FLAG_ALL = \
         (1<<x for x in range(0,6))
@@ -134,18 +134,18 @@ class JobState(Base):
     #: Dirty status of job flags
     flags_dirty = Column(Integer)
 
-    # Values of dirty flags
+    #: Values of dirty flags
     D_ID, D_SERVICE, D_SCHEDULER, D_STATE, D_EXIT_MESSAGE, D_EXIT_STATE, D_EXIT_CODE, \
         D_SUBMIT_TIME, D_START_TIME, D_STOP_TIME, D_WAIT_TIME, D_FLAGS, \
         D_ALL = \
         (1<<x for x in range(0,13))
     D_ALL -= 1
+    #: Dirty status of job attributes
     attr_dirty = Column(Integer)
 
     def __init__(self, id, service=None, scheduler=None, state=None, exit_message=None,
                  exit_state=None, exit_code=None, submit_time=None, start_time=None,
                  stop_time=None, wait_time=None, flags=0):
-        #: Dirty flags
         self.attr_dirty = 0
         self.flags_dirty = 0
         self.id = id
@@ -236,7 +236,7 @@ def set_job_state_flags(target, value, oldvalue, initiator):
 # Listeners to "delete" event for JobState instances. Call the cleanup.
 @event.listens_for(JobState, 'after_delete')
 def delete_job_state(mapper, connection, target):
-    StateManager.cleanup(target.id)
+    G.STATE_MANAGER.cleanup(target.id)
 
 @event.listens_for(Session, 'before_flush')
 def flush_session(thissession, flush_context, instances):
@@ -371,7 +371,7 @@ class Job(Base):
             raise Exception("Inconsistent job IDs: %s != %s" % (job_state.id, job_id))
 
         _service = None
-        for _name in Services.ServiceStore:
+        for _name in G.SERVICE_STORE:
             if job_id.startswith(_name):
                 _service = _name
         if _service is None:
@@ -458,7 +458,7 @@ class Job(Base):
     def processing(self):
         """ Mark job as in processing state. """
         self.__set_state('processing')
-        self.size = Services.ServiceStore[self.status.service].config['job_size']
+        self.size = G.SERVICE_STORE[self.status.service].config['job_size']
 
     def queue(self):
         """ Mark job as queued. """
@@ -711,7 +711,6 @@ class StateManager(object):
     Based on SQLite database allows for creation, menagement and querying of
     jobs.
     """
-
     def __init__(self):
         self.session_factory = None
         self.session_factory_noflush = None
@@ -757,6 +756,8 @@ class StateManager(object):
         logger.debug("StateManager initialized")
 
     def clear(self):
+        """
+        """
         self.session.close()
         self.engine = None
         self.session_factory = None
@@ -856,11 +857,11 @@ class StateManager(object):
         """
         raise NotImplementedError
 
-    def cleanup(self, status):
+    def cleanup(self, job_id):
         """
         Cleanup AppGW state after Job removal.
 
-        :param status: JobState instance.
+        :param job_id: Job ID.
         """
         raise NotImplementedError
 
@@ -970,7 +971,7 @@ class StateManager(object):
             session = self.session
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
+        if scheduler is not None and scheduler not in G.SCHEDULER_STORE:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
@@ -978,7 +979,7 @@ class StateManager(object):
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s", state)
             return
-        if service is not None and service not in Services.ServiceStore:
+        if service is not None and service not in G.SERVICE_STORE:
             logger.error("@StateManager - Unknown service: %s", service)
             return
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
@@ -1060,7 +1061,7 @@ class StateManager(object):
         _job_count = -1
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
+        if scheduler is not None and scheduler not in G.SCHEDULER_STORE:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
@@ -1068,7 +1069,7 @@ class StateManager(object):
         if state != 'all' and state not in conf.service_states:
             logger.error("@StateManager - Unknown state: %s", state)
             return _job_count
-        if service is not None and service not in Services.ServiceStore:
+        if service is not None and service not in G.SERVICE_STORE:
             logger.error("@StateManager - Unknown service: %s", service)
             return _job_count
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
@@ -1110,12 +1111,12 @@ class StateManager(object):
         _job_count = -1
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
+        if scheduler is not None and scheduler not in G.SCHEDULER_STORE:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
             return _job_count
-        if service is not None and service not in Services.ServiceStore:
+        if service is not None and service not in G.SERVICE_STORE:
             logger.error("@StateManager - Unknown service: %s", service)
             return _job_count
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
@@ -1154,12 +1155,12 @@ class StateManager(object):
         _job_count = []
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
+        if scheduler is not None and scheduler not in G.SCHEDULER_STORE:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
             return _job_count
-        if service is not None and service not in Services.ServiceStore:
+        if service is not None and service not in G.SERVICE_STORE:
             logger.error("@StateManager - Unknown service: %s", service)
             return _job_count
         if flag is not None and flag <= 0 or flag > JobState.FLAG_ALL:
@@ -1201,7 +1202,7 @@ class StateManager(object):
         _job_count = []
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
+        if scheduler is not None and scheduler not in G.SCHEDULER_STORE:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
@@ -1249,7 +1250,7 @@ class StateManager(object):
         _quota_count = []
 
         # Validate input
-        if scheduler is not None and scheduler not in Schedulers.SchedulerStore:
+        if scheduler is not None and scheduler not in G.SCHEDULER_STORE:
             logger.error(
                 "@StateManager - unknown scheduler %s.", scheduler
             )
@@ -1283,7 +1284,7 @@ class StateManager(object):
             session = self.session
 
         # Input validation
-        if service != 'all' and service not in Services.ServiceStore:
+        if service != 'all' and service not in G.SERVICE_STORE:
             raise Exception("@StateManager - Unknown service %s." % service)
         if flag <= 0 or flag > JobState.FLAG_ALL:
             raise Exception("Unknown flag: %s" % flag)
@@ -1695,5 +1696,3 @@ class FileStateManager(StateManager):
         # Remove the dirty flag
         status.flags_dirty = 0
 
-# Singleton object
-StateManager = FileStateManager()

@@ -1,5 +1,6 @@
 # -*- coding: UTF-8 -*-
 """
+Module with implementations of the Service interface.
 """
 
 # Plugins
@@ -16,7 +17,7 @@ from yapsy.PluginManager import PluginManager
 
 # Import full modules - resolves circular dependencies
 import Jobs
-import Schedulers
+import Globals as G
 from Config import conf, VERBOSE
 
 
@@ -81,7 +82,7 @@ class Validator(object):
 
         _plugins = []
         # @TODO What about shared plugins??
-        for _service_name, _service in ServiceStore.items():
+        for _service_name, _service in G.SERVICE_STORE.items():
             # Plugin
             if _service.plugins is not None:
                 _plugin_dir = os.path.join(conf.service_path_data, _service_name)
@@ -118,13 +119,13 @@ class Validator(object):
         # Check if data contains service attribute and that such service was
         # initialized
         if 'service' not in _data or \
-                _data['service'] not in ServiceStore or \
+                _data['service'] not in G.SERVICE_STORE or \
                 _data['service'] == 'default':
             raise ValidatorError("Not supported service: %s." %
                                  _data['service'])
 
         job.status.service = _data['service']
-        _service = ServiceStore[_data['service']]
+        _service = G.SERVICE_STORE[_data['service']]
         job.status.scheduler = _service.config['scheduler']
 
         # Make sure that input dictionary exists
@@ -204,7 +205,7 @@ class Validator(object):
             # date
             elif _k in conf.service_reserved_keys:
                 _variables[_k] = self.validate_value([_k], _v,
-                                                     ServiceStore['default'].variables[_k])
+                                                     G.SERVICE_STORE['default'].variables[_k])
                 logger.debug(
                     "Value passed validation: %s = %s", _k, _v
                 )
@@ -249,6 +250,11 @@ class Validator(object):
         :param path: a list of nested attribute names for logging, e.g. [object, list_attribute, 10]
         :param value: value to validate
         :param template: dictionary describing the variable
+        :param nesting_level: current nesting level
+        :return: validated variable
+
+        The parameter **value** should be of the following form::
+
             {
                 'type': 'float_array',
                 'default':[1.0, 2.5],
@@ -256,7 +262,7 @@ class Validator(object):
                 'length':10
             }
 
-            Allowed 'type's:
+        - Allowed 'type's:
             * string
             * int
             * float
@@ -268,17 +274,15 @@ class Validator(object):
             * datetime_array
             * object_array
 
-            'default' should be of an appropriate type.
+        - 'default' should be of an appropriate type.
 
-            'values' defines allowed value of the variable:
+        - 'values' defines allowed value of the variable:
             * string - white list of strings
             * int, float - [min. max]
             * datetime - strptime format string
             * object - dictionary with keys being attribute names and values dictionaries defining variable templates
 
-            'length' is only mandatory for array types and defines maximum allowed length
-        :param nesting_level: current nesting level
-        :return: validated variable
+        - 'length' is only mandatory for array types and defines maximum allowed length
         """
 
         # temporary cache variables
@@ -543,7 +547,7 @@ class Validator(object):
         Validate input chains
         :param chain: list of job IDs this job depends on.
         """
-        _finished = (_j.id() for _j in Jobs.StateManager.get_job_list('done'))
+        _finished = (_j.id() for _j in STATE_MANAGER.get_job_list('done'))
         for _id in chain:
             # ID of type string check if it is listed among finished jobs
             if _id not in _finished:
@@ -586,7 +590,7 @@ class Service(dict):
             'job_size': conf.service_job_size,
             'username': conf.service_username,
             'scheduler': conf.service_default_scheduler,
-            'queue': Schedulers.SchedulerStore[conf.service_default_scheduler].default_queue
+            'queue': G.SCHEDULER_STORE[conf.service_default_scheduler].default_queue
         }
         # Load settings from config file
         self.config.update(data['config'])
@@ -631,8 +635,3 @@ class ServiceStore(dict):
         if logger.getEffectiveLevel() <= VERBOSE:
             logger.log(VERBOSE, json.dumps(self))
 
-
-#: Validator singleton
-Validator = Validator()
-#: ServiceStore singleton
-ServiceStore = ServiceStore()

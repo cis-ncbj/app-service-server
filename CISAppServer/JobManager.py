@@ -15,11 +15,11 @@ import cProfile
 
 from datetime import datetime, timedelta
 
+import Globals as G
 from Config import conf, VERBOSE, ExitCodes
-from Services import Validator, ValidatorInputFileError, ValidatorError, \
-        CisError, ServiceStore
-from Schedulers import SchedulerStore, rmtree_error
-from Jobs import JobState, StateManager
+from Services import ValidatorInputFileError, ValidatorError, CisError
+from Schedulers import rmtree_error
+from Jobs import JobState
 
 version = "0.9"
 
@@ -44,11 +44,7 @@ class JobManager(object):
 
         Existing state is purged.
         """
-        # Make sure state manager is initialized
-        StateManager.init()
-        # Initialize schedulers and services
-        SchedulerStore.init()
-        ServiceStore.init()
+        G.init()
 
         # Main loop run guard
         self.__running = True
@@ -60,11 +56,11 @@ class JobManager(object):
         self.__last_service_size = {}
         # Warning counter - quota
         self.__w_counter_quota = {}
-        for _s in ServiceStore:
+        for _s in G.SERVICE_STORE:
             self.__w_counter_quota[_s] = 0
         # Warning counter - slots
         self.__w_counter_slots = {}
-        for _s in ServiceStore:
+        for _s in G.SERVICE_STORE:
             self.__w_counter_slots[_s] = 0
         # Time stamp for the last iteration
         self.__time_stamp = datetime.utcnow()
@@ -85,7 +81,7 @@ class JobManager(object):
 
     def clear(self):
         # Push not commited changes to DB and expire local cache.
-        StateManager.check_commit()
+        G.STATE_MANAGER.check_commit()
         logger.debug("Closing subprocesses")
         self.__thread_pool_submit.close()
         self.__thread_pool_cleanup.close()
@@ -98,7 +94,7 @@ class JobManager(object):
         if self.__terminate:
             _job_list = []
             try:
-                _job_list = StateManager.get_job_list("closing")
+                _job_list = G.STATE_MANAGER.get_job_list("closing")
             except:
                 logger.error('Unable to contact with the DB.', exc_info=True)
 
@@ -113,11 +109,11 @@ class JobManager(object):
                     _job.exit()
 
         # Pass the final state to AppGw
-        StateManager.check_commit()
+        G.STATE_MANAGER.check_commit()
         self.report_jobs()
-        StateManager.clear()
-        ServiceStore.clear()
-        SchedulerStore.clear()
+        G.STATE_MANAGER.clear()
+        G.SERVICE_STORE.clear()
+        G.SCHEDULER_STORE.clear()
 
 
     def check_new_jobs(self):
@@ -141,7 +137,7 @@ class JobManager(object):
         logger.log(VERBOSE, '@JManager - Run query.')
         # Count current active jobs
         try:
-            _active_count = StateManager.get_active_job_count()
+            _active_count = G.STATE_MANAGER.get_active_job_count()
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
@@ -156,9 +152,9 @@ class JobManager(object):
 
         # Available job slots per service
         #_service_slots = {}
-        #for (_service_name, _service) in ServiceStore.items():
+        #for (_service_name, _service) in G.SERVICE_STORE.items():
             # Count current active jobs
-            #_service_active_count = StateManager.get_active_job_count(
+            #_service_active_count = G.STATE_MANAGER.get_active_job_count(
             #        service=_service_name)
             # Available job slots
             #_service_slots[_service_name] = _service.config['max_jobs'] - \
@@ -167,30 +163,30 @@ class JobManager(object):
         #TODO Add available job slots per scheduler - flag the jobs to wait
         # Available job slots per service
         try:
-            _counters = StateManager.get_active_service_counters()
+            _counters = G.STATE_MANAGER.get_active_service_counters()
         except:
             logger.error('Unable to contact the DB.', exc_info=True)
             return
-        _service_jobs = { _key : 0 for _key in ServiceStore }
+        _service_jobs = { _key : 0 for _key in G.SERVICE_STORE }
         for (_count, _key) in _counters:
             _service_jobs[_key] = _count
 
         # Available quota per service
         try:
-            _counters = StateManager.get_quota_service_counters()
+            _counters = G.STATE_MANAGER.get_quota_service_counters()
         except:
             logger.error('Unable to contact the DB.', exc_info=True)
             return
         _service_quota = {
                 _key : _service.config['quota'] for \
-                        _key, _service in ServiceStore.items()
+                        _key, _service in G.SERVICE_STORE.items()
                 }
         for (_count, _key) in _counters:
             _service_quota[_key] -= _count
 
         # Available job slots
         _service_slots = {}
-        for (_service_name, _service) in ServiceStore.items():
+        for (_service_name, _service) in G.SERVICE_STORE.items():
             _service_slots[_service_name] = _service.config['max_jobs'] - \
                     _service_jobs[_service_name]
 
@@ -200,7 +196,7 @@ class JobManager(object):
         _j = 0
         _batch = []
         try:
-            _job_list = StateManager.get_new_job_list()
+            _job_list = G.STATE_MANAGER.get_new_job_list()
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
@@ -262,7 +258,7 @@ class JobManager(object):
 
             logger.debug('@JManager - Detected new job %s.', _job.id())
             _service_name = _job.status.service
-            _service = ServiceStore[_service_name]
+            _service = G.SERVICE_STORE[_service_name]
             # Check available service slots
             if _service_slots[_service_name] <= 0:
                 # Limit the number of warning messages
@@ -312,7 +308,7 @@ class JobManager(object):
                 # in batch_submit. Otherwise a SELECT is issued for each job.
                 # @TODO test if this is required
                 try:
-                    StateManager.get_job_list("waiting")
+                    G.STATE_MANAGER.get_job_list("waiting")
                 except:
                     logger.error('Unable to contact with the DB.', exc_info=True)
                     return
@@ -330,9 +326,9 @@ class JobManager(object):
         logger.log(VERBOSE, '@JManager - Check state of running jobs.')
 
         # Loop over supported schedulers
-        for _sname, _scheduler in SchedulerStore.items():
+        for _sname, _scheduler in G.SCHEDULER_STORE.items():
             try:
-                _jobs = StateManager.get_job_list(scheduler=_sname)
+                _jobs = G.STATE_MANAGER.get_job_list(scheduler=_sname)
             except:
                 logger.error('Unable to contact with the DB.', exc_info=True)
                 continue
@@ -371,7 +367,7 @@ class JobManager(object):
         _i = 0
         _batch = []
         try:
-            _job_list = StateManager.get_job_list("closing")
+            _job_list = G.STATE_MANAGER.get_job_list("closing")
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
@@ -416,7 +412,7 @@ class JobManager(object):
         logger.log(VERBOSE, '@JManager - Check for kill requests.')
 
         try:
-            _job_list = StateManager.get_job_list(flag=JobState.FLAG_STOP)
+            _job_list = G.STATE_MANAGER.get_job_list(flag=JobState.FLAG_STOP)
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
@@ -433,7 +429,7 @@ class JobManager(object):
             if _job.get_state() == 'running' or \
                     _job.get_state() == 'queued':
                 try:
-                    SchedulerStore[_job.status.scheduler].stop(
+                    G.SCHEDULER_STORE[_job.status.scheduler].stop(
                         _job, 'User request', ExitCodes.UserKill
                     )
                 except CisError as e: # Temporary job stop problem
@@ -466,7 +462,7 @@ class JobManager(object):
         logger.log(VERBOSE, '@JManager - Check for delete requests.')
 
         try:
-            _job_list = StateManager.get_job_list(flag=JobState.FLAG_DELETE)
+            _job_list = G.STATE_MANAGER.get_job_list(flag=JobState.FLAG_DELETE)
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
@@ -479,7 +475,7 @@ class JobManager(object):
             # Stop if it is running
             if _job.get_state() in ('running', 'queued'):
                 try:
-                    SchedulerStore[_job.status.scheduler].stop(
+                    G.SCHEDULER_STORE[_job.status.scheduler].stop(
                         _job, 'User request', ExitCodes.Delete
                     )
                 except CisError as e: # Temporary job stop problem
@@ -506,7 +502,7 @@ class JobManager(object):
 
             # Delete the job
             try:
-                StateManager.delete_job(_job)
+                G.STATE_MANAGER.delete_job(_job)
             except:
                 #@TODO some limit on remove attempts?
                 logger.error("Cannot remove job %s.", _jid, exc_info=True)
@@ -523,7 +519,7 @@ class JobManager(object):
         logger.log(VERBOSE, '@JManager - Check for expired jobs.')
 
         try:
-            _job_list = StateManager.get_job_list()
+            _job_list = G.STATE_MANAGER.get_job_list()
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
@@ -542,7 +538,7 @@ class JobManager(object):
             logger.log(VERBOSE, "Job %s, State:%s, Status:%s", _job.id(), _state, str(_job.status))
 
             # Check the MAX job lifetime defined by the service
-            _delete_dt = ServiceStore[_job.status.service].config['max_lifetime']
+            _delete_dt = G.SERVICE_STORE[_job.status.service].config['max_lifetime']
             if _delete_dt == 0:
                 continue
 
@@ -555,7 +551,7 @@ class JobManager(object):
                 elif _state == 'running':  # For running jobs use the MAX runtime
                     _path_time = _job.status.start_time
                     _delete_dt = \
-                        ServiceStore[_job.status.service].config['max_runtime']
+                        G.SERVICE_STORE[_job.status.service].config['max_runtime']
                     _dt = timedelta(hours=_delete_dt)
                 else:  # Jobs in other states are not affected
                     continue
@@ -588,7 +584,7 @@ class JobManager(object):
         """
 
         try:
-            _results = StateManager.get_job_state_counters()
+            _results = G.STATE_MANAGER.get_job_state_counters()
         except:
             logger.error("Unable to contact the DB.", exc_info=True)
             return
@@ -634,7 +630,7 @@ class JobManager(object):
                 _clean = False
                 logger.debug("Removed finished subprocess.")
         if not _clean:
-            StateManager.check_commit()
+            G.STATE_MANAGER.check_commit()
 
     def check_stuck_jobs(self):
         """
@@ -644,7 +640,7 @@ class JobManager(object):
         worker is present that was supposed to take care of those jobs.
         """
         try:
-            _job_list = StateManager.get_job_list("cleanup")
+            _job_list = G.STATE_MANAGER.get_job_list("cleanup")
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
@@ -654,7 +650,7 @@ class JobManager(object):
             _job.close()
 
         try:
-            _job_list = StateManager.get_job_list("processing")
+            _job_list = G.STATE_MANAGER.get_job_list("processing")
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
             return
@@ -663,7 +659,7 @@ class JobManager(object):
         for _job in _job_list:
             _job.wait()
 
-        StateManager.check_commit()
+        G.STATE_MANAGER.check_commit()
 
     def collect_garbage(self, full=False):
         """
@@ -679,20 +675,20 @@ class JobManager(object):
 
         # Available quota per service
         try:
-            _counters = StateManager.get_quota_service_counters()
+            _counters = G.STATE_MANAGER.get_quota_service_counters()
         except:
             logger.error('Unable to contact the DB.', exc_info=True)
             return
-        _service_usage = { _key : 0 for _key in ServiceStore }
+        _service_usage = { _key : 0 for _key in G.SERVICE_STORE }
         _service_quota = { _key : _service.config['quota'] \
-                for _key, _service in ServiceStore.items() }
+                for _key, _service in G.SERVICE_STORE.items() }
         for (_count, _key) in _counters:
             _service_usage[_key] = _count
 
         logger.log(VERBOSE, 'Service quota utilisation: %s.', _service_usage)
         logger.log(VERBOSE, 'Service quota limits: %s.', _service_quota)
 
-        for (_service_name, _service) in ServiceStore.items():
+        for (_service_name, _service) in G.SERVICE_STORE.items():
             _usage = _service_usage[_service_name]
             _start_size = _usage
             _delta = _service.config['job_size']
@@ -711,11 +707,11 @@ class JobManager(object):
             _job_table = []  # List of tuples (lifetime, job)
             _job_list = []
             try:
-                _job_list = StateManager.get_job_list()
+                _job_list = G.STATE_MANAGER.get_job_list()
             except:
                 logger.error('Unable to contact with the DB.', exc_info=True)
 
-            for _job in StateManager.get_job_list(service=_service_name):
+            for _job in G.STATE_MANAGER.get_job_list(service=_service_name):
                 _jid = _job.id()
                 if _job.get_flag(JobState.FLAG_DELETE):
                     continue
@@ -787,7 +783,7 @@ class JobManager(object):
             except:
                 _job.die("Unable to change state.")
 
-        if not StateManager.check_commit():
+        if not G.STATE_MANAGER.check_commit():
             return
 
         try:
@@ -817,7 +813,7 @@ class JobManager(object):
 
         logger.debug('Change jobs state and commit to the DB.')
         # Mark job as in processing state and commit to DB
-        if not StateManager.check_commit():
+        if not G.STATE_MANAGER.check_commit():
             return
 
         try:
@@ -842,7 +838,7 @@ class JobManager(object):
         logger.info("Starting shutdown")
 
         # Push to DB not commited changes and expire local cache
-        StateManager.check_commit()
+        G.STATE_MANAGER.check_commit()
 
         time.sleep(conf.config_shutdown_time)
         self.check_running_jobs()
@@ -852,14 +848,14 @@ class JobManager(object):
         if self.__terminate:
             _job_list = []
             try:
-                _job_list = StateManager.get_job_list()
+                _job_list = G.STATE_MANAGER.get_job_list()
             except:
                 logger.error('Unable to contact with the DB.', exc_info=True)
 
             for _job in _job_list:
                 _state = _job.get_state()
                 if _state in ('queued', 'running'):
-                    _scheduler = SchedulerStore[_job.status.scheduler]
+                    _scheduler = G.SCHEDULER_STORE[_job.status.scheduler]
                     try:
                         _scheduler.stop(_job, 'Server shutdown', ExitCodes.Shutdown)
                     except CisError as e: # Temporary job stop problem
@@ -871,7 +867,7 @@ class JobManager(object):
                     _job.finish('User request', 'killed', ExitCodes.Shutdown)
                 #@TODO What with the processiong jobs
             # Push to DB not commited changes and expire local cache
-            StateManager.check_commit()
+            G.STATE_MANAGER.check_commit()
             # Wait for PBS to kill the jobs
             time.sleep(conf.config_shutdown_time)
 
@@ -948,7 +944,7 @@ class JobManager(object):
 
             # Execute loop
             try:
-                StateManager.poll_gw()
+                G.STATE_MANAGER.poll_gw()
             except:
                 logger.error("Unable to poll GW.",
                              exc_info=True)
@@ -967,9 +963,9 @@ class JobManager(object):
             self.check_finished_threads()
             self.check_deleted_jobs()
             # Commit changes to the DB. This should expire local cache and resync it with DB on next access.
-            if not StateManager.check_commit():
+            if not G.STATE_MANAGER.check_commit():
                 time.sleep(5)
-                if not StateManager.check_commit():
+                if not G.STATE_MANAGER.check_commit():
                     self.shutdown()
             _n += 1
 
@@ -1001,12 +997,8 @@ def worker_init(config, work_id, lock):
     logging.root.removeHandler(_h)
     # Initialize DB - has to be serialized
     lock.acquire()
-    StateManager.init()
+    G.init()
     lock.release()
-    # Initialize services, shcdulers and validator
-    ServiceStore.init()
-    SchedulerStore.init()
-    Validator.init()
 
 def worker_submit_profile(job_ids):
     """
@@ -1025,11 +1017,11 @@ def worker_submit(job_ids):
     logger.debug("Submit batch of %s jobs.", len(job_ids))
 
     try:
-        _session = StateManager.new_session(autoflush=False)
+        _session = G.STATE_MANAGER.new_session(autoflush=False)
         # Do an eager load so that no more SELECT statements are issued.
         # This should prevent issuing update statements on job changes
         # untli commit is issued and will prevent the DB lock.
-        _jobs = StateManager.get_job_list_byid(job_ids, session=_session, full=True)
+        _jobs = G.STATE_MANAGER.get_job_list_byid(job_ids, session=_session, full=True)
     except:
         logger.error("Unable to connect to DB.",
                      exc_info=True)
@@ -1041,7 +1033,7 @@ def worker_submit(job_ids):
 
         # Validate input
         try:
-            Validator.validate(_job)
+            G.VALIDATOR.validate(_job)
         except ValidatorInputFileError as e:
             # The input file is not available yet. Flag the job to wait.
             _job.set_flag(JobState.FLAG_WAIT_INPUT)
@@ -1067,7 +1059,7 @@ def worker_submit(job_ids):
         # During validation default values are set in Job.valid_data
         # Now we can access scheduler selected for current Job
         try:
-            _scheduler = SchedulerStore[_job.status.scheduler]
+            _scheduler = G.SCHEDULER_STORE[_job.status.scheduler]
         except:
             _job.die("Unable to obtain scheduler and "
                          "service instance.", exc_info=True)
@@ -1084,7 +1076,7 @@ def worker_submit(job_ids):
             _job.die("Unable to submit job.", exc_info=True)
             continue
 
-    StateManager.check_commit(_session)
+    G.STATE_MANAGER.check_commit(_session)
     logger.debug("Job submit thread finished.")
 
 def worker_cleanup_profile(job_ids):
@@ -1100,8 +1092,8 @@ def worker_cleanup(job_ids):
     logger.debug("Cleanup batch of %s jobs.", len(job_ids))
 
     try:
-        _session = StateManager.new_session(autoflush=False)
-        _jobs = StateManager.get_job_list_byid(job_ids, session=_session, full=True)
+        _session = G.STATE_MANAGER.new_session(autoflush=False)
+        _jobs = G.STATE_MANAGER.get_job_list_byid(job_ids, session=_session, full=True)
     except:
         logger.error("Unable to connect to DB.",
                      exc_info=True)
@@ -1116,7 +1108,7 @@ def worker_cleanup(job_ids):
             _job.exit()
         else:
             try:
-                _scheduler = SchedulerStore[_job.status.scheduler]
+                _scheduler = G.SCHEDULER_STORE[_job.status.scheduler]
                 if _job.get_exit_state() == 'aborted':
                     _scheduler.abort(_job)
                 else:
@@ -1127,6 +1119,6 @@ def worker_cleanup(job_ids):
                              _jid, exc_info=True)
                 continue
 
-    StateManager.check_commit(_session)
+    G.STATE_MANAGER.check_commit(_session)
     logger.debug("Job cleanup thread finished.")
 

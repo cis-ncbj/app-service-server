@@ -36,7 +36,14 @@ class ExitCodes:
 
 
 class CISFormatter(logging.Formatter):
+    """
+    Specialised logging formatter class.
 
+    Increase the verbosity of ERROR level messages - include information about
+    the caller.
+    """
+
+    #: Format of ERROR messages
     err_fmt  = "%(levelname)7s %(asctime)s [%(threadName)s:%(filename)s:%(lineno)s - %(funcName)s()] :\n%(message)s"
 
     def __init__(self, fmt="%(levelno)s: %(msg)s"):
@@ -44,6 +51,10 @@ class CISFormatter(logging.Formatter):
 
 
     def format(self, record):
+        """
+        Overloaded logging.Formatter.format method. Will adjust the message
+        format based on logging level.
+        """
 
         # Save the original format configured by the user
         # when the logger formatter was instantiated
@@ -88,11 +99,16 @@ class Config(dict):
 
         # Define default values
         self.config_file = None  #: Config file name
-        # DB URL in a sqlalchemy format. http://docs.sqlalchemy.org/en/latest/core/engines.html#database-urls
+        #: Job database URL in a SQLAlchemy format:
+        #: http://docs.sqlalchemy.org/en/rel_1_0/core/engines.html#supported-databases
         self.config_db = 'sqlite:///jobs.db'
-        # List of SQL statements to send to the DB on init. Mainly to set some pragmas
+        #: List of SQL statements to be called after connection initialization.
+        #: Useful to set some DB engine configuration e.g. for SQLite
+        #: ["pragma foreign_keys=on", "pragma journal_mode=WAL"]
         self.config_db_init = ()
-        # Time in second after which connection pool recycles. This should prevent lost connections to MySQL which closes them by default after 8 hours.
+        #: Time in second after which connection pool recycles. This should
+        #: prevent lost connections to MySQL which closes them by default after
+        #: 8 hours.
         self.config_db_recycle = 3600
         #: Sleep interval in seconds between job status queries
         self.config_sleep_time = 5
@@ -103,7 +119,7 @@ class Config(dict):
         #: Timeout for job cleanup before forcing shutdown
         self.config_shutdown_time = 2
         #: Timeout for jobs with wait flag in seconds (Job with wait flag will
-        #  be ignored when processing the waiting queue)
+        #: be ignored when processing the waiting queue)
         self.config_wait_time = 120
         #: Maximum number of all active jobs
         self.config_max_jobs = 1000
@@ -198,6 +214,9 @@ class Config(dict):
         self.ssh_max_jobs = {
             'localhost': 2
         }
+        #: Path for minimal known_hosts SSH file. Speeds up significantly older
+        #: paramiko versions. Requires a patch to spur
+        #: (available within AppServer repo)
         self.ssh_known_hosts = \
                 os.path.join(
                     os.path.join(os.environ["HOME"], ".ssh"),

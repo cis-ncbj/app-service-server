@@ -1,7 +1,6 @@
 # -*- coding: UTF-8 -*-
 """
-Utility classes used by CISAppServer: validation, communication with queue
-managers, etc.
+Module with implementations of the Scheduler interface.
 """
 
 import os
@@ -20,8 +19,8 @@ from jinja2 import Environment, FileSystemLoader, Template
 
 from sqlalchemy.exc import SQLAlchemyError
 
-import Services  # Import full module - resolves circular dependencies
 import Jobs  # Import full module - resolves circular dependencies
+import Globals as G
 from Config import conf, VERBOSE, ExitCodes
 from Tools import rollback
 
@@ -440,8 +439,8 @@ class PbsScheduler(Scheduler):
         # from JobManager
         _job_count = -1
         try:
-            _session = Jobs.StateManager.new_session()
-            _job_count = Jobs.StateManager.get_job_count(scheduler=self.name,
+            _session = G.STATE_MANAGER.new_session()
+            _job_count = G.STATE_MANAGER.get_job_count(scheduler=self.name,
                                                          session=_session)
             _session.close()
         except:
@@ -456,7 +455,7 @@ class PbsScheduler(Scheduler):
         _run_script = os.path.join(_work_dir, "pbs.sh")
         _output_log = os.path.join(_work_dir, "output.log")
         # Select queue
-        _queue = Services.ServiceStore[job.status.service].config['queue']
+        _queue = G.SERVICE_STORE[job.status.service].config['queue']
         if 'CIS_QUEUE' in job.data.data:
             _queue = job.data.data['CIS_QUEUE']
 
@@ -537,7 +536,7 @@ class PbsScheduler(Scheduler):
         """
         # Extract list of user names associated to the jobs
         _users = []
-        for _service in Services.ServiceStore.values():
+        for _service in G.SERVICE_STORE.values():
             if _service.config['username'] not in _users:
                 _users.append(_service.config['username'])
 
@@ -722,8 +721,8 @@ class SshScheduler(Scheduler):
         """
 
         # Select execution host
-        _queue = Services.ServiceStore[job.status.service].config['queue']
-        _user = Services.ServiceStore[job.status.service].config['username']
+        _queue = G.SERVICE_STORE[job.status.service].config['queue']
+        _user = G.SERVICE_STORE[job.status.service].config['username']
         if 'CIS_SSH_HOST' in job.data.data:
             _queue = job.data.data['CIS_SSH_HOST']
 
@@ -732,8 +731,8 @@ class SshScheduler(Scheduler):
         # from JobManager
         _job_count = -1
         try:
-            _session = Jobs.StateManager.new_session()
-            _job_count = Jobs.StateManager.get_job_count(scheduler=self.name,
+            _session = G.STATE_MANAGER.new_session()
+            _job_count = G.STATE_MANAGER.get_job_count(scheduler=self.name,
                                                          session=_session)
             _session.close()
         except:
@@ -791,7 +790,7 @@ class SshScheduler(Scheduler):
         # Extract list of user names and queues associated to the jobs
         _users = {}
         for _job in jobs:
-            _service = Services.ServiceStore[_job.status.service]
+            _service = G.SERVICE_STORE[_job.status.service]
             _usr = _service.config['username']
             if _usr not in _users:
                 _users[_usr] = []
@@ -900,7 +899,7 @@ class SshScheduler(Scheduler):
         # Run shdel
         logger.debug("@SSH - Killing job")
         # Run shdel with proper user permissions
-        _usr = Services.ServiceStore[job.status.service].config['username']
+        _usr = G.SERVICE_STORE[job.status.service].config['username']
         _queue = job.scheduler.queue
         _shdel = os.path.join(
             os.path.dirname(conf.daemon_path_installdir),
@@ -996,8 +995,8 @@ class DummyScheduler(Scheduler):
         # from JobManager
         _job_count = -1
         try:
-            _session = Jobs.StateManager.new_session()
-            _job_count = Jobs.StateManager.get_job_count(scheduler=self.name,
+            _session = G.STATE_MANAGER.new_session()
+            _job_count = G.STATE_MANAGER.get_job_count(scheduler=self.name,
                                                          session=_session)
             _session.close()
         except:
@@ -1164,5 +1163,3 @@ class SchedulerStore(dict):
             elif _scheduler == 'dummy':
                 self[_scheduler] = DummyScheduler()
 
-
-SchedulerStore = SchedulerStore()

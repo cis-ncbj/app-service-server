@@ -209,7 +209,15 @@ class DaemonRunner(object):
 
             # Instatiate job_manager
             self.job_manager = JobManager()
+        except Exception:
+            logger.error(u"Shutdown, exception cought.",
+                         exc_info=True)
+            logger.info(u"Shutdown complete.")
+            logging.shutdown()
+            sys.exit(1)
 
+        # Main loop
+        try:
             # Profile main loop execution
             #cProfile.runctx('self.job_manager.run()', globals(), locals(),
             #                'main_prof.prof')
