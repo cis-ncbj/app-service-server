@@ -1,11 +1,13 @@
 # Test suite for Scheduler module
 import shutil
 
-from Schedulers import conf, Scheduler, SchedulerStore
+import Globals as G
+from Config import conf
+from Schedulers import Scheduler
 from Jobs import Job
 from nose.tools import eq_, ok_, raises
 import os
-from Services import ServiceStore, Service, Validator
+#from Services import ServiceStore, Service, Validator
 
 
 def setup_module():
@@ -18,8 +20,7 @@ def setup_module():
     conf.gate_path_jobs = os.path.join(test_assets, 'payloads')
     conf.service_path_conf = os.path.join(test_assets, 'services')
     conf.service_path_data = os.path.join(test_assets, 'services','Data')
-    SchedulerStore.init()
-    ServiceStore.init()
+    G.init()
     # add testing services to services list
     #for _service in ['test', 'default', 'basic']:
     #    with open(os.path.join(test_assets, 'services', _service+'.json')) as _f:
@@ -55,7 +56,7 @@ class TestGenerateScripts(object):
         # here i could create tmp object to spoofing Job for testing purposes,
         # but for now I'm too lazy and I have trust that 'validate' function is flawless
         # TODO change that
-        Validator.validate(job)
+        G.VALIDATOR.validate(job)
         ######
         ok_(self.scheduler.generate_scripts(job), "Generating script")
         check_file(os.path.join(self.scheduler.work_path, job.id(), 'pbs.sh'),
@@ -85,7 +86,7 @@ class TestGenerateScripts(object):
         # here i could create tmp object to spoofing Job for testing purposes,
         # but for now I'm too lazy and I have trust that 'validate' function is flawless
         # TODO change that
-        Validator.validate(job)
+        G.VALIDATOR.validate(job)
         ok_(self.scheduler.generate_scripts(job), "Generating script")
         check_file(os.path.join(self.scheduler.work_path, job.id(),'pbs.sh'),
                     ["#!/bin/sh",
