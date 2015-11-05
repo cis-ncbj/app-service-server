@@ -3,10 +3,21 @@
   "config": {},
   "sets": {},
   "variables": {
+    "test_integer": {
+      "type": "int",
+      "default": 10,
+      "values": [-150, 150]
+    },
     "test_float": {
       "type": "float",
       "default": 2.3,
-      "values": [0, 100]
+      "values": [-150, 150]
+    },
+    "test_integer_array": {
+      "type": "int_array",
+      "default": [2,3],
+      "length": 4,
+      "values": [0,100]
     },
     "test_float_array": {
       "type": "float_array",
