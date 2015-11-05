@@ -707,11 +707,11 @@ class JobManager(object):
             _job_table = []  # List of tuples (lifetime, job)
             _job_list = []
             try:
-                _job_list = G.STATE_MANAGER.get_job_list()
+                _job_list = G.STATE_MANAGER.get_job_list(service=_service_name)
             except:
                 logger.error('Unable to contact with the DB.', exc_info=True)
 
-            for _job in G.STATE_MANAGER.get_job_list(service=_service_name):
+            for _job in _job_list:
                 _jid = _job.id()
                 if _job.get_flag(JobState.FLAG_DELETE):
                     continue

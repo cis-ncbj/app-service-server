@@ -14,7 +14,7 @@ from decorator import decorator
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.mutable import Mutable
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, DataError
 from sqlalchemy.pool import Pool
 from sqlalchemy import event, create_engine, func
 from sqlalchemy.orm import relationship, backref, sessionmaker, deferred, \
@@ -1090,7 +1090,6 @@ class StateManager(object):
         # Execute query
         return _q.count()
 
-    @rollback(SQLAlchemyError)
     def get_active_job_count(self, service=None, scheduler=None, flag=None,
                       session=None):
         """
@@ -1104,6 +1103,7 @@ class StateManager(object):
             of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
+        :raises:
         """
         if session is None:
             session = self.session
@@ -1148,6 +1148,7 @@ class StateManager(object):
             of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
+        :raises:
         """
         if session is None:
             session = self.session
@@ -1195,6 +1196,7 @@ class StateManager(object):
             of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
+        :raises:
         """
         if session is None:
             session = self.session
@@ -1243,6 +1245,7 @@ class StateManager(object):
             of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
+        :raises:
         """
         if session is None:
             session = self.session
@@ -1348,6 +1351,35 @@ class FileStateManager(StateManager):
             _job = self.new_job(_jid)
             if _job is None:
                 continue
+
+        # TODO an explicit commit would be usefull. The query below will issue
+        # a commit anyway. What if job is malformed and results in an SQL error?
+        # We should singleout such jobs and throw them away ...
+        try:
+            self.commit()
+        except DataError:
+            # TODO
+            # Are the job objects invalidated?? Should we remove them?? Should
+            # we create them anew??
+            # For now create them once again ...
+
+            # Limit number of jobs to process and commit them one by one. Mark
+            # as aborted those that fail.
+            _n = (conf.config_batch_jobs * conf.config_max_threads) / 10
+            if len(_list) > _n:
+                _list = _list[0:_n]
+            for _jid in _list:
+                # Create new Job instance. It will be created in 'waiting' state
+                _job = self.new_job(_jid)
+                if _job is None:
+                    continue
+                try:
+                    self.commit()
+                except DataError:
+                    _js = JobState()
+                    _js.id = _jid
+                    _js.state = "aborted"
+                    self.__state_change(_js)
 
         # Get list of waiting jobs (includes new requests and request not processed yet)
         _jobs = self.get_job_list("waiting")
