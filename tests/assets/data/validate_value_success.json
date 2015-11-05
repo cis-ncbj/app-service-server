@@ -1,0 +1,104 @@
+[
+  // **** Test cases for test_validate_value_success ****
+  //
+  // * integers
+  //
+  // int value
+  ["test_integer", 1, 1],
+  // string with float
+  ["test_integer", "11", 11],
+  // negative value
+  ["test_integer", -2, -2],
+  // boolean false
+  ["test_integer", false, 0],
+  // boolean true
+  ["test_integer", true, 1],
+  //
+  // * floats
+  //
+  // float value
+  ["test_float", 0.1, 0.1],
+  // string with float
+  ["test_float", "0.1", 0.1],
+  // integer
+  ["test_float", 10, 10.0],
+  // string with integer
+  ["test_float", "10", 10.0],
+  // negative value
+  ["test_float", -2.5, -2.5],
+  // scientific notation in string
+  ["test_float", "1.34e+2", 134.0],
+  // boolean false
+  ["test_float", false, 0.0],
+  // boolean true
+  ["test_float", true, 1.0],
+  //
+  // * integer arrays
+  //
+  // proper list
+  ["test_integer_array", [1, 55, 23], [1, 55, 23]],
+  // list of integers as strings
+  ["test_integer_array", ["1", "55", "23"], [1, 55, 23]],
+  //
+  // * float arrays
+  //
+  // proper list
+  ["test_float_array", [0.1, 55.3, 2.3], [0.1, 55.3, 2.3]],
+  // list of floats as strings
+  ["test_float_array", ["0.1", "55.3", "2.3"], [0.1, 55.3, 2.3]],
+  //
+  // * dates
+  //
+  // correct date input
+  ["test_date", "20150317 135200", "20150317 135200"],
+  // Month and day without leading zeros
+  // returns 2003-4-4 13:52 ... is that correct? lets keep it that way
+  ["test_date", "200344 135200", "200344 135200"],
+  //
+  // * objects
+  //
+  // full object
+  ["test_object", {"A":2, "B":[4, 5, 34], "C":"20191115 112000"}, {"A":2, "B":[4, 5, 34], "C":"20191115 112000"}],
+  // object with one default element
+  ["test_object", {"A":2, "B":[4, 5, 34]}, {"A":2, "B":[4, 5, 34], "C":"20151115 112000"}],
+  // empty object
+  ["test_object", {}, {"A":1, "B":[2, 3, 4], "C":"20151115 112000"}],
+  //
+  // * object arrays
+  //
+  // Proper array of objects
+  ["test_object_array",
+    [
+      {"K":2, "L":"21011119 133010"},
+      {"K":0.2, "L":"20050119 033010"},
+      {"K":20.1, "L":"22011116 103110"}
+    ],
+    [
+      {"K":2, "L":"21011119 133010"},
+      {"K":0.2, "L":"20050119 033010"},
+      {"K":20.1, "L":"22011116 103110"}
+    ]
+  ],
+  // mixed empty and defined elements
+  ["test_object_array",
+    [
+      {},
+      {"K":2, "L":"21011119 133010"}
+    ],
+    [
+      {"K":1.2, "L":"20011119 103010"},
+      {"K":2, "L":"21011119 133010"}
+    ]
+  ],
+  // empty objects
+  ["test_object_array",
+    [
+      {},
+      {}
+    ],
+    [
+      {"K":1.2, "L":"20011119 103010"},
+      {"K":1.2, "L":"20011119 103010"}
+    ]
+  ]
+]

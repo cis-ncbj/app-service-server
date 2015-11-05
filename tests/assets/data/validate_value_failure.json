@@ -1,0 +1,112 @@
+[
+  // **** Test cases for test_validate_value_failure ****
+  //
+  // * integers
+  //
+  // random string
+  ["test_integer", "ss"],
+  // array of floats
+  ["test_integer", [1, 2, 3]],
+  // float
+  ["test_integer", 10.7],
+  // string with float
+  ["test_integer", "10.7"],
+  // scientific notation in string
+  ["test_integer", "1.34e+2"],
+  // outside bounds - upper limit
+  ["test_integer", 200],
+  // outside bounds - lower limit
+  ["test_integer", -200],
+  //
+  // * floats
+  //
+  // random string
+  ["test_float", "ss"],
+  // localised decimal point
+  ["test_float", "0,1"],
+  // array of floats
+  ["test_float", [1.0, 2.0, 3.0]],
+  // outside bounds - upper limit
+  ["test_float", 200.0],
+  // outside bounds - lower limit
+  ["test_float", -200.0],
+  //
+  // * integer arrays
+  //
+  // number instead of array: failed up to commit #106aa0669
+  ["test_integer_array", 2],
+  // too many values
+  ["test_integer_array", [1, 55, 23, 33, 51, 7]],
+  // value out of bounds
+  ["test_integer_array", [599999999, 7]],
+  // value out of bounds
+  ["test_integer_array", [51, -75]],
+  // string
+  ["test_integer_array", "[11, 14]"],
+  // array of random strings
+  ["test_integer_array", ["dddd", "fff"]],
+  //
+  // * float arrays
+  //
+  // number instead of array: failed up to commit #106aa0669
+  ["test_float_array", 2],
+  // too many values
+  ["test_float_array", [0.1, 55.3, 2.3, 33.21, 5.1, 7.5]],
+  // value out of bounds
+  ["test_float_array", [599999999.1, 7.5]],
+  // value out of bounds
+  ["test_float_array", [5.1, -7.5]],
+  // string
+  ["test_float_array", "[11.5, 1.4]"],
+  // array of random strings
+  ["test_float_array", ["dddd", "fff"]],
+  //
+  // * dates
+  //
+  // random string
+  ["test_date", "ssss"],
+  // another random string
+  ["test_date", "201w 005200"],
+  // integer
+  ["test_date", 121],
+  // float
+  ["test_date", 121.121],
+  // too short date
+  ["test_date", "201503 135200"],
+  // day out of bounds
+  ["test_date", "20150344 135200"],
+  // hour our of bounds
+  ["test_date", "20150317 995200"],
+  // month out of bound
+  ["test_date", "20151317 005200"],
+  // array of strings
+  ["test_date", ["20150317", "135200"]],
+  //
+  // * objects
+  //
+  // undefined element
+  ["test_object", {"A":2, "B":[4, 5, 34], "D":10}],
+  // malformed date
+  ["test_object", {"A":2, "B":[4, 5, 34], "C":"bla"}],
+  // array
+  ["test_object", [1,1]],
+  // string
+  ["test_object", "{'A':121}"],
+  // not valid variable
+  ["test_object", {"A":9999999999999}],
+  // not valid variable
+  ["test_object", {"B":[4, 5, 34, 1, 2, 3, 4, 5, 6, 1002]}],
+  //
+  // * object arrays
+  //
+  // object
+  ["test_object_array", {"A":1}],
+  // one element is invalid - hour out of bounds
+  ["test_object_array",
+    [
+      {"K":2, "L":"21011119 133010"},
+      {"K":0.2, "L":"20050119 333010"},
+      {"K":20.1, "L":"22011116 103110"}
+    ]
+  ]
+]
