@@ -64,6 +64,7 @@ class JobManager(object):
             self.__w_counter_slots[_s] = 0
         # Time stamp for the last iteration
         self.__time_stamp = datetime.utcnow()
+        self.__timing = {}
         # Thread list
         self.__thread_lock = multiprocessing.Lock()
         self.__thread_pool_submit = multiprocessing.Pool(
@@ -80,6 +81,8 @@ class JobManager(object):
         self.__thread_list_cleanup = []
 
     def clear(self):
+        _start_time = datetime.utcnow()
+
         # Push not commited changes to DB and expire local cache.
         G.STATE_MANAGER.check_commit()
         logger.debug("Closing subprocesses")
@@ -115,6 +118,8 @@ class JobManager(object):
         G.SERVICE_STORE.clear()
         G.SCHEDULER_STORE.clear()
 
+        self.__timing["clear"] = (datetime.utcnow() - _start_time).total_seconds()
+
 
     def check_new_jobs(self):
         """
@@ -122,6 +127,7 @@ class JobManager(object):
 
         If found try to submit them to selected job scheduler.
         """
+        _start_time = datetime.utcnow()
 
         logger.log(VERBOSE, '@JManager - Check for new jobs.')
 
@@ -140,6 +146,7 @@ class JobManager(object):
             _active_count = G.STATE_MANAGER.get_active_job_count()
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
+            self.__timing["check_new_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         # Available job slots
@@ -166,6 +173,7 @@ class JobManager(object):
             _counters = G.STATE_MANAGER.get_active_service_counters()
         except:
             logger.error('Unable to contact the DB.', exc_info=True)
+            self.__timing["check_new_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
             return
         _service_jobs = { _key : 0 for _key in G.SERVICE_STORE }
         for (_count, _key) in _counters:
@@ -176,6 +184,7 @@ class JobManager(object):
             _counters = G.STATE_MANAGER.get_quota_service_counters()
         except:
             logger.error('Unable to contact the DB.', exc_info=True)
+            self.__timing["check_new_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
             return
         _service_quota = {
                 _key : _service.config['quota'] for \
@@ -199,6 +208,7 @@ class JobManager(object):
             _job_list = G.STATE_MANAGER.get_new_job_list()
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
+            self.__timing["check_new_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
             return
         logger.debug("Detected %s new jobs", len(_job_list))
         for _job in _job_list:
@@ -311,10 +321,13 @@ class JobManager(object):
                     G.STATE_MANAGER.get_job_list("waiting")
                 except:
                     logger.error('Unable to contact with the DB.', exc_info=True)
+                    self.__timing["check_new_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
                     return
 
         if len(_batch):
             self.batch_submit(_batch)
+
+        self.__timing["check_new_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
 
     def check_running_jobs(self):
         """
@@ -322,6 +335,7 @@ class JobManager(object):
 
         Finished jobs will be marked for finalisation
         """
+        _start_time = datetime.utcnow()
 
         logger.log(VERBOSE, '@JManager - Check state of running jobs.')
 
@@ -352,12 +366,15 @@ class JobManager(object):
             except:
                 logger.error('Error occured while updating job states.', exc_info=True)
 
+        self.__timing["check_running_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
+
     def check_cleanup(self):
         """
         Check jobs marked for cleanup.
 
         Starts the cleanup for the jobs in separate threads.
         """
+        _start_time = datetime.utcnow()
 
         logger.log(VERBOSE, '@JManager - Check for jobs marked for cleanup.')
 
@@ -370,6 +387,7 @@ class JobManager(object):
             _job_list = G.STATE_MANAGER.get_job_list("closing")
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
+            self.__timing["check_cleanup"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         logger.debug("Found %s jobs ready for cleanup", len(_job_list))
@@ -402,12 +420,15 @@ class JobManager(object):
         if len(_batch):
             self.batch_cleanup(_batch)
 
+        self.__timing["check_cleanup"] = (datetime.utcnow() - _start_time).total_seconds()
+
     def check_job_kill_requests(self):
         """
         Check for job kill requests.
 
         If found and job is still running kill it.
         """
+        _start_time = datetime.utcnow()
 
         logger.log(VERBOSE, '@JManager - Check for kill requests.')
 
@@ -415,6 +436,7 @@ class JobManager(object):
             _job_list = G.STATE_MANAGER.get_job_list(flag=JobState.FLAG_STOP)
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
+            self.__timing["check_job_kill_requests"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         for _job in _job_list:
@@ -451,6 +473,8 @@ class JobManager(object):
                 logger.error("Cannot remove kill flag for job %s.", _job.id(),
                              exc_info=True)
 
+        self.__timing["check_job_kill_requests"] = (datetime.utcnow() - _start_time).total_seconds()
+
     def check_deleted_jobs(self):
         """
         Check for jobs marked for removal.
@@ -458,6 +482,7 @@ class JobManager(object):
         If found remove all resources related to the job. If a job is still
         running kill it.
         """
+        _start_time = datetime.utcnow()
 
         logger.log(VERBOSE, '@JManager - Check for delete requests.')
 
@@ -465,6 +490,7 @@ class JobManager(object):
             _job_list = G.STATE_MANAGER.get_job_list(flag=JobState.FLAG_DELETE)
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
+            self.__timing["check_deleted_job"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         for _job in _job_list:
@@ -511,10 +537,13 @@ class JobManager(object):
             logger.info('@JManager - Job %s removed with all data.' %
                         _jid)
 
+        self.__timing["check_deleted_job"] = (datetime.utcnow() - _start_time).total_seconds()
+
     def check_old_jobs(self):
         """Check for jobs that exceed their life time.
 
         If found mark them for removal."""
+        _start_time = datetime.utcnow()
 
         logger.log(VERBOSE, '@JManager - Check for expired jobs.')
 
@@ -522,6 +551,7 @@ class JobManager(object):
             _job_list = G.STATE_MANAGER.get_job_list()
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
+            self.__timing["check_old_job"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         for _job in _job_list:
@@ -578,15 +608,19 @@ class JobManager(object):
                     logger.error("@JManager - unable schedule job for removal.",
                                  exc_info=True)
 
+        self.__timing["check_old_job"] = (datetime.utcnow() - _start_time).total_seconds()
+
     def report_jobs(self):
         """
         Log the current queue state.
         """
+        _start_time = datetime.utcnow()
 
         try:
             _results = G.STATE_MANAGER.get_job_state_counters()
         except:
             logger.error("Unable to contact the DB.", exc_info=True)
+            self.__timing["report_job"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         _states = { _key : 0 for _key in conf.service_states }
@@ -599,10 +633,13 @@ class JobManager(object):
                 _states['cleanup'], _states['done'], _states['failed'],
                 _states['aborted'], _states['killed'])
 
+        self.__timing["report_job"] = (datetime.utcnow() - _start_time).total_seconds()
+
     def check_finished_threads(self):
         """Check for cleanup threads that finished execution.
 
         If found finalise them."""
+        _start_time = datetime.utcnow()
 
         logger.log(VERBOSE, '@JManager - Check for finished cleanup threads.')
 
@@ -632,6 +669,8 @@ class JobManager(object):
         if not _clean:
             G.STATE_MANAGER.check_commit()
 
+        self.__timing["check_finished_threads"] = (datetime.utcnow() - _start_time).total_seconds()
+
     def check_stuck_jobs(self):
         """
         Check for jobs in processing and cleanup states. If found when
@@ -639,10 +678,12 @@ class JobManager(object):
         states as otherwise nothing will tuch them. When we are starting no
         worker is present that was supposed to take care of those jobs.
         """
+        _start_time = datetime.utcnow()
         try:
             _job_list = G.STATE_MANAGER.get_job_list("cleanup")
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
+            self.__timing["check_stuck_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         logger.debug("Found %s jobs stuck in closing state", len(_job_list))
@@ -653,6 +694,7 @@ class JobManager(object):
             _job_list = G.STATE_MANAGER.get_job_list("processing")
         except:
             logger.error('Unable to contact with the DB.', exc_info=True)
+            self.__timing["check_stuck_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         logger.debug("Found %s jobs stuck in processing state", len(_job_list))
@@ -660,6 +702,8 @@ class JobManager(object):
             _job.wait()
 
         G.STATE_MANAGER.check_commit()
+
+        self.__timing["check_stuck_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
 
     def collect_garbage(self, full=False):
         """
@@ -670,6 +714,7 @@ class JobManager(object):
             not above alloted quota. In addition removes all jobs older than
             min job life time.
         """
+        _start_time = datetime.utcnow()
 
         logger.log(VERBOSE, '@JManager - Garbage collect.')
 
@@ -678,6 +723,7 @@ class JobManager(object):
             _counters = G.STATE_MANAGER.get_quota_service_counters()
         except:
             logger.error('Unable to contact the DB.', exc_info=True)
+            self.__timing["collect_garbage"] = (datetime.utcnow() - _start_time).total_seconds()
             return
         _service_usage = { _key : 0 for _key in G.SERVICE_STORE }
         _service_quota = { _key : _service.config['quota'] \
@@ -773,7 +819,10 @@ class JobManager(object):
                     ((_start_size - _usage) / 1000000.0)
                 )
 
+        self.__timing["collect_garbage"] = (datetime.utcnow() - _start_time).total_seconds()
+
     def batch_submit(self, batch):
+        _start_time = datetime.utcnow()
         _job_ids = []
         # Run submit in separate threads
         for _job in batch:
@@ -784,6 +833,7 @@ class JobManager(object):
                 _job.die("Unable to change state.")
 
         if not G.STATE_MANAGER.check_commit():
+            self.__timing["batch_submit"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         try:
@@ -801,7 +851,10 @@ class JobManager(object):
             logger.error("@JManager - Unable to start submit thread %s",
                          exc_info=True)
 
+        self.__timing["batch_submit"] = (datetime.utcnow() - _start_time).total_seconds()
+
     def batch_cleanup(self, batch):
+        _start_time = datetime.utcnow()
         _job_ids = []
         # Run submit in separate threads
         for _job in batch:
@@ -814,6 +867,7 @@ class JobManager(object):
         logger.debug('Change jobs state and commit to the DB.')
         # Mark job as in processing state and commit to DB
         if not G.STATE_MANAGER.check_commit():
+            self.__timing["batch_cleanup"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
         try:
@@ -830,6 +884,8 @@ class JobManager(object):
         except:
             logger.error("@JManager - Unable to start cleanup thread %s",
                          exc_info=True)
+
+        self.__timing["batch_cleanup"] = (datetime.utcnow() - _start_time).total_seconds()
 
     def shutdown(self):
         """
@@ -934,13 +990,15 @@ class JobManager(object):
             _dt = conf.config_sleep_time - _exec_time
             if _dt < 0:
                 if _dt + conf.config_sleep_time < 0:
-                    logger.error("@JobManager - Main loop execution behind "
+                    logger.error("Main loop execution behind "
                                  "schedule by %s seconds.", _dt)
+                    logger.error("Timing profile %s", self.__timing)
             else:
                 # Sleep
                 time.sleep(_dt)
             # Store new time stamp
             self.__time_stamp = datetime.utcnow()
+            self.__timing = {}
 
             # Execute loop
             try:
