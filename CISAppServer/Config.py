@@ -101,7 +101,7 @@ class Config(dict):
         self.config_file = None  #: Config file name
         #: Job database URL in a SQLAlchemy format:
         #: http://docs.sqlalchemy.org/en/rel_1_0/core/engines.html#supported-databases
-        self.config_db = 'sqlite:///jobs.db'
+        self.config_db = 'sqlite://'
         #: List of SQL statements to be called after connection initialization.
         #: Useful to set some DB engine configuration e.g. for SQLite
         #: ["pragma foreign_keys=on", "pragma journal_mode=WAL"]
