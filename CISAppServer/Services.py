@@ -253,7 +253,7 @@ class Validator(object):
         :param nesting_level: current nesting level
         :return: validated variable
 
-        The parameter **value** should be of the following form::
+        The parameter **template** should be of the following form::
 
             {
                 'type': 'float_array',
@@ -325,6 +325,11 @@ class Validator(object):
             except ValueError:
                 raise ValidatorError(
                     "%s = %s - value not in supported format (%s)" %
+                    (".".join(path), value, _variable_allowed_values)
+                )
+            except TypeError:
+                raise ValidatorError(
+                    "%s = %s - date should be provided as a string (%s)" %
                     (".".join(path), value, _variable_allowed_values)
                 )
             return value
@@ -547,7 +552,9 @@ class Validator(object):
         Validate input chains
         :param chain: list of job IDs this job depends on.
         """
-        _finished = (_j.id() for _j in STATE_MANAGER.get_job_list('done'))
+        # TODO check only if the chain exists not if its done. Make this job
+        # wait if it is not finished
+        _finished = (_j.id() for _j in G.STATE_MANAGER.get_job_list('done'))
         for _id in chain:
             # ID of type string check if it is listed among finished jobs
             if _id not in _finished:
