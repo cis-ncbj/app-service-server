@@ -210,7 +210,8 @@ class JobManager(object):
             logger.error('Unable to contact with the DB.', exc_info=True)
             self.__timing["check_new_jobs"] = (datetime.utcnow() - _start_time).total_seconds()
             return
-        logger.debug("Detected %s new jobs", len(_job_list))
+        if len(_job_list):
+            logger.debug("Detected %s new jobs", len(_job_list))
         for _job in _job_list:
             if _job.get_flag(JobState.FLAG_DELETE):
                 continue
@@ -390,7 +391,8 @@ class JobManager(object):
             self.__timing["check_cleanup"] = (datetime.utcnow() - _start_time).total_seconds()
             return
 
-        logger.debug("Found %s jobs ready for cleanup", len(_job_list))
+        if len(_job_list):
+            logger.debug("Found %s jobs ready for cleanup", len(_job_list))
         for _job in _job_list:
             # Check for unit of work time left
             if not self.__check_unit_timer():
@@ -657,7 +659,7 @@ class JobManager(object):
                 _clean = False
                 logger.debug("Removed finished subprocess.")
         for _thread in self.__thread_list_cleanup:
-            if not _thread.ready():
+            if _thread.ready():
                 try:
                     _thread.get()
                 except:
@@ -985,7 +987,7 @@ class JobManager(object):
 
             # Calculate last iteration execute time
             _exec_time = (datetime.utcnow() - self.__time_stamp).total_seconds()
-            logger.debug("Iteration time: %s", _exec_time)
+            logger.log(VERBOSE, "Iteration time: %s", _exec_time)
             # Calculate required sleep time
             _dt = conf.config_sleep_time - _exec_time
             if _dt < 0:

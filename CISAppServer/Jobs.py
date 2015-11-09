@@ -817,7 +817,7 @@ class StateManager(object):
                 if session is not None:
                     session.close()
                 _commit = True
-                logger.debug("Commit to DB successfull.")
+                logger.log(VERBOSE, "Commit to DB successfull.")
                 break
             #TODO What about errors in GW sync for FileStateManager??
             except SQLAlchemyError as e:
