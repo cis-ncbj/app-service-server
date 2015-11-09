@@ -1,16 +1,15 @@
 #!/bin/bash
 
-#module load python-tornado
-module load python-basemap
+#PBS -l nodes=1:ppn=10,walltime=1:00:00
+
+module load python-analysis/1.4-x86_64-gcc46-python27-mkl
 module load python-tools
-
-
 
 server=/mnt/home/kgomulski/utils/
 export PATH=$PATH:$server/ffmpeg
 postprocess_scripts=$server/ResultServer
 
-python $postprocess_scripts/animation.py \
+$server/env/bin/python $postprocess_scripts/animation.py \
             --path @@{CIS_CHAIN0}/output \
             --age @@{age} \
             --spc @@{spc} \
@@ -18,7 +17,10 @@ python $postprocess_scripts/animation.py \
             --min @@{min} \
             --max @@{max} \
             --scale @@{scale} \
-            --format @@{format}  
+            --format @@{format} \
+            --workers $NCPUS
+
 cp metadata.json maps/
 cd maps
-tar -zcvf maps.tar.gz *
+ls | grep -P "^tmp_[0-9]{4}.png$" | xargs -d"\n" rm
+tar -zcvf maps.tar.gz * 
