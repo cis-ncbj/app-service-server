@@ -554,7 +554,18 @@ class Validator(object):
         """
         # TODO check only if the chain exists not if its done. Make this job
         # wait if it is not finished
-        _finished = (_j.id() for _j in G.STATE_MANAGER.get_job_list('done'))
+        _finished = []
+        try:
+            _session = G.STATE_MANAGER.new_session()
+            _finished = list(
+                    _j.id() for _j in G.STATE_MANAGER.get_job_list(
+                        'done', session=_session
+                    )
+                )
+            _session.close()
+        except:
+            logger.error("@PBS - Unable to connect to DB.", exc_info=True)
+        logger.debug('Finished jobs: %s', _finished)
         for _id in chain:
             # ID of type string check if it is listed among finished jobs
             if _id not in _finished:
