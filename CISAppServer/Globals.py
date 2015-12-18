@@ -12,7 +12,7 @@ Therefore they are implemented as module globals for now.
 After refactoring this could go away.
 """
 
-STATE_MANAGER = None
+#STATE_MANAGER = None
 VALIDATOR = None
 SERVICE_STORE = None
 SCHEDULER_STORE = None
@@ -22,19 +22,19 @@ def init():
     """
     Initialize the global instances.
     """
-    import Jobs
+#    import Jobs
     import Schedulers
     import Services
 
-    global STATE_MANAGER
+#    global STATE_MANAGER
     global VALIDATOR
     global SERVICE_STORE
     global SCHEDULER_STORE
-    STATE_MANAGER = Jobs.FileStateManager()
+#    STATE_MANAGER = Jobs.FileStateManager()
     VALIDATOR = Services.Validator()
     SERVICE_STORE = Services.ServiceStore()
     SCHEDULER_STORE = Schedulers.SchedulerStore()
 
-    STATE_MANAGER.init()
+#    STATE_MANAGER.init()
     SCHEDULER_STORE.init()
     SERVICE_STORE.init()

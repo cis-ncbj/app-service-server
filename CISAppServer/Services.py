@@ -74,6 +74,8 @@ class Validator(object):
         # self.job = None
         #: PluginManager instance
         self.pm = PluginManager()
+        #: StateManager instance
+        self.state_manager = Jobs.state_manager_factory("FileStateManager")
 
     def init(self):
         """
@@ -92,6 +94,7 @@ class Validator(object):
         # Load plugins
         self.pm.setPluginPlaces(_plugins)
         self.pm.collectPlugins()
+        self.state_manager.init()
 
     def validate(self, job):
         """
@@ -556,15 +559,15 @@ class Validator(object):
         # wait if it is not finished
         _finished = []
         try:
-            _session = G.STATE_MANAGER.new_session()
-            _finished = list(
-                    _j.id() for _j in G.STATE_MANAGER.get_job_list(
-                        'done', session=_session
+            with Jobs.session_scope(self.state_manager) as _session:
+                _finished = list(
+                        _j.id() for _j in self.state_manager.get_job_list(
+                            _session, 'done'
+                        )
                     )
-                )
-            _session.close()
         except:
             logger.error("@PBS - Unable to connect to DB.", exc_info=True)
+
         logger.debug('Finished jobs: %s', _finished)
         for _id in chain:
             # ID of type string check if it is listed among finished jobs

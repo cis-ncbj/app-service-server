@@ -68,6 +68,9 @@ class Scheduler(object):
             trim_blocks=True,
             lstrip_blocks=True
         )
+        #: StateManager instance
+        self.state_manager = Jobs.state_manager_factory("FileStateManager")
+        self.state_manager.init()
 
     def submit(self, job):
         """
@@ -186,12 +189,9 @@ class Scheduler(object):
             logger.error("@Scheduler - Unable to remove job SchedulerQueue.",
                          exc_info=True)
 
-        try:
-            # Set job exit state
-            job.exit()
-        except:
-            logger.error("@Scheduler - Unable to finalize cleanup.",
-                         exc_info=True)
+        # Set job exit state
+        job.exit()
+
         logger.debug("@Scheduler - job finalised: %s", _jid)
 
     def abort(self, job):
@@ -205,7 +205,7 @@ class Scheduler(object):
 
         _jid = job.id()
 
-        logger.debug("@Scheduler - Cleanup job: %s", _jid)
+        logger.debug("Cleanup job: %s", _jid)
 
         _work_dir = os.path.join(self.work_path, _jid)
         _out_dir = os.path.join(conf.gate_path_output, _jid)
@@ -213,20 +213,20 @@ class Scheduler(object):
 
         # Remove output dir if it exists.
         if os.path.isdir(_out_dir):
-            logger.debug('@Scheduler - Remove existing output directory')
+            logger.debug('Remove existing output directory')
             shutil.rmtree(_out_dir, ignore_errors=True)
         # Remove work dir if it exists.
         if os.path.isdir(_work_dir):
-            logger.debug('@Scheduler - Remove working directory')
+            logger.debug('Remove working directory')
             shutil.rmtree(_work_dir, ignore_errors=True)
 
         if os.path.isdir(_out_dir):
             _clean = False
-            logger.error("@Scheduler - Unable to remove job output directory: "
+            logger.error("Unable to remove job output directory: "
                          "%s", _jid, exc_info=True)
         if os.path.isdir(_work_dir):
             _clean = False
-            logger.error("@Scheduler - Unable to remove job working "
+            logger.error("Unable to remove job working "
                          "directory: %s", _jid, exc_info=True)
         if _clean:
             logger.info("Job %s cleaned directories.", _jid)
@@ -235,17 +235,19 @@ class Scheduler(object):
         try:
             job.scheduler = None
         except:
-            logger.error("@Scheduler - Unable to remove job SchedulerQueue.",
+            logger.error("Unable to remove job SchedulerQueue.",
                          exc_info=True)
+            raise
 
-        logger.debug("@Scheduler - finalize cleanup: %s", _jid)
+        logger.debug("Finalize cleanup: %s", _jid)
         try:
             # Set job exit state
             job.exit()
         except:
-            logger.error("@Scheduler - Unable to finalize cleanup.",
+            logger.error("Unable to finalize cleanup.",
                          exc_info=True)
-        logger.debug("@Scheduler - job abort finished: %s", _jid)
+            raise
+        logger.debug("Job abort finished: %s", _jid)
 
     def generate_scripts(self, job):
         """
@@ -439,92 +441,91 @@ class PbsScheduler(Scheduler):
         # from JobManager
         _job_count = -1
         try:
-            _session = G.STATE_MANAGER.new_session()
-            _job_count = G.STATE_MANAGER.get_job_count(scheduler=self.name,
-                                                         session=_session)
-            _session.close()
+            with Jobs.session_scope(self.state_manager) as _session:
+                _job_count = self.state_manager.get_job_count(scheduler=self.name,
+                                                             session=_session)
+                if _job_count < 0:
+                    return False
+                if _job_count >= self.max_jobs:
+                    return False
+
+                # Path names
+                _work_dir = os.path.join(self.work_path, job.id())
+                _run_script = os.path.join(_work_dir, "pbs.sh")
+                _output_log = os.path.join(_work_dir, "output.log")
+                # Select queue
+                _queue = G.SERVICE_STORE[job.status.service].config['queue']
+                if 'CIS_QUEUE' in job.data.data:
+                    _queue = job.data.data['CIS_QUEUE']
+
+                try:
+                    # Submit
+                    logger.debug("@PBS - Submitting new job")
+                    # Run qsub with proper user permissions
+                    #
+                    # @TODO
+                    # Implementation of dedicated users for each service
+                    # - The apprunner user currently does not allow to log in via ssh
+                    # - either this limitation is lifted or the server will be run as
+                    #    another user that is allowed to perform "sudo su apprunner"
+                    #  - to execute sudo su a TTY is required
+                    #  - this can be cirumvented using "ssh -t -t"
+                    #   - A passwordless key is setup:
+                    #    - .ssh/authorized_keys entry contains from="127.0.0.1" to
+                    #      limit the scope of the key
+                    #    - .ssh/config contains following entries to auto select the
+                    #      correct key when connecting to the "local" host:
+                    #     Host local
+                    #         HostName 127.0.0.1
+                    #         Port 22
+                    #         IdentityFile ~/.ssh/id_dsa_local
+                    #  - using this will generate TTY warning messages that are
+                    #    suppressed only for OpenSSH 5.4 or newer. Hence the STDERR
+                    #    should not be mixed with STDIN in this case
+                    # - There still is a problem of file permisions:
+                    #  - Data management is run with service users permisions
+                    #  - Data is set to be group writable
+                    #  - We use ACLs
+                    # @TODO END
+                    #
+                    # _user = self.jm.services[job.service].config['username']
+                    # _comm = "/usr/bin/qsub -q %s -d %s -j oe -o %s " \
+                    # "-l epilogue=epilogue.sh %s" % \
+                    # (_queue, _work_dir, _output_log, _run_script)
+                    # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
+                    # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
+                    _opts = ['/usr/bin/qsub', '-q', _queue, '-d', _work_dir, '-j',
+                             'oe', '-o', _output_log, '-l', 'epilogue=epilogue.sh',
+                             _run_script]
+                    logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
+                    _proc = Popen(_opts, stdout=PIPE, stderr=PIPE)
+                    _out = _proc.communicate()
+                    _output = _out[0]
+                    logger.log(VERBOSE, _out)
+                    # Hopefully qsub returned meaningful job ID
+                    _pbs_id = _output.strip()
+                    # Check return code. If qsub was not killed by signal Popen will
+                    # not rise an exception
+                    if _proc.returncode != 0:
+                        raise OSError((
+                            _proc.returncode,
+                            "/usr/bin/qsub returned non zero exit code.\n%s" %
+                            str(_out)
+                        ))
+                except:
+                    job.die("@PBS - Unable to submit job %s." % job.id(), exc_info=True)
+                    return False
+
+                # @TODO Do I need DB session here???
+                # Store the PBS job ID
+                job.scheduler = Jobs.SchedulerQueue(
+                    scheduler=self.name, id=_pbs_id, queue=_queue)
+                # Reduce memory footprint
+                job.compact()
+
+                logger.info("Job successfully submitted: %s", job.id())
         except:
             logger.error("@PBS - Unable to connect to DB.", exc_info=True)
-        if _job_count < 0:
-            return False
-        if _job_count >= self.max_jobs:
-            return False
-
-        # Path names
-        _work_dir = os.path.join(self.work_path, job.id())
-        _run_script = os.path.join(_work_dir, "pbs.sh")
-        _output_log = os.path.join(_work_dir, "output.log")
-        # Select queue
-        _queue = G.SERVICE_STORE[job.status.service].config['queue']
-        if 'CIS_QUEUE' in job.data.data:
-            _queue = job.data.data['CIS_QUEUE']
-
-        try:
-            # Submit
-            logger.debug("@PBS - Submitting new job")
-            # Run qsub with proper user permissions
-            #
-            # @TODO
-            # Implementation of dedicated users for each service
-            # - The apprunner user currently does not allow to log in via ssh
-            # - either this limitation is lifted or the server will be run as
-            #    another user that is allowed to perform "sudo su apprunner"
-            #  - to execute sudo su a TTY is required
-            #  - this can be cirumvented using "ssh -t -t"
-            #   - A passwordless key is setup:
-            #    - .ssh/authorized_keys entry contains from="127.0.0.1" to
-            #      limit the scope of the key
-            #    - .ssh/config contains following entries to auto select the
-            #      correct key when connecting to the "local" host:
-            #     Host local
-            #         HostName 127.0.0.1
-            #         Port 22
-            #         IdentityFile ~/.ssh/id_dsa_local
-            #  - using this will generate TTY warning messages that are
-            #    suppressed only for OpenSSH 5.4 or newer. Hence the STDERR
-            #    should not be mixed with STDIN in this case
-            # - There still is a problem of file permisions:
-            #  - Data management is run with service users permisions
-            #  - Data is set to be group writable
-            #  - We use ACLs
-            # @TODO END
-            #
-            # _user = self.jm.services[job.service].config['username']
-            # _comm = "/usr/bin/qsub -q %s -d %s -j oe -o %s " \
-            # "-l epilogue=epilogue.sh %s" % \
-            # (_queue, _work_dir, _output_log, _run_script)
-            # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
-            # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
-            _opts = ['/usr/bin/qsub', '-q', _queue, '-d', _work_dir, '-j',
-                     'oe', '-o', _output_log, '-l', 'epilogue=epilogue.sh',
-                     _run_script]
-            logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
-            _proc = Popen(_opts, stdout=PIPE, stderr=PIPE)
-            _out = _proc.communicate()
-            _output = _out[0]
-            logger.log(VERBOSE, _out)
-            # Hopefully qsub returned meaningful job ID
-            _pbs_id = _output.strip()
-            # Check return code. If qsub was not killed by signal Popen will
-            # not rise an exception
-            if _proc.returncode != 0:
-                raise OSError((
-                    _proc.returncode,
-                    "/usr/bin/qsub returned non zero exit code.\n%s" %
-                    str(_out)
-                ))
-        except:
-            job.die("@PBS - Unable to submit job %s." % job.id(), exc_info=True)
-            return False
-
-        # @TODO Do I need DB session here???
-        # Store the PBS job ID
-        job.scheduler = Jobs.SchedulerQueue(
-            scheduler=self.name, id=_pbs_id, queue=_queue)
-        # Reduce memory footprint
-        job.compact()
-
-        logger.info("Job successfully submitted: %s", job.id())
         return True
 
     @rollback(SQLAlchemyError)
@@ -731,53 +732,53 @@ class SshScheduler(Scheduler):
         # from JobManager
         _job_count = -1
         try:
-            _session = G.STATE_MANAGER.new_session()
-            _job_count = G.STATE_MANAGER.get_job_count(scheduler=self.name,
-                                                         session=_session)
-            _session.close()
+            with Jobs.session_scope(self.state_manager) as _session:
+                _job_count = self.state_manager.get_job_count(scheduler=self.name,
+                                                             session=_session)
+                if _job_count < 0:
+                    return False
+                # @TODO fix !!! self.max_jobs[_queue], check that queue is defined,
+                # otherwise use some default. What happens with the job when submit
+                # fails - switch to waiting state? What if someting is mosconfigured
+                # and it will never enter queue - max submit retries?
+                if _job_count >= self.max_jobs:
+                    return False
+
+                # Path names
+                _work_dir = os.path.join(self.work_path, job.id())
+                _run_script = os.path.join(_work_dir, "pbs.sh")
+                _output_log = os.path.join(_work_dir, "output.log")
+
+                # @TODO handle timouts etc ...
+                try:
+                    # Submit
+                    logger.debug("@SSH - Submitting new job: %s@%s", _user, _queue)
+                    # Run shsub with proper user permissions
+                    _shsub = os.path.join(os.path.dirname(conf.daemon_path_installdir),
+                                          "Scripts")
+                    _shsub = os.path.join(_shsub, "shsub")
+                    _ssh = self.__get_ssh_connection(_queue, _user)
+                    _comm = [_shsub, "-i", job.id(), "-d", _work_dir, "-o",
+                             _output_log, _run_script]
+                    logger.log(VERBOSE, "@SSH - Running command: %s", _comm)
+                    # Submit the job. Will rise exception if shsub would return an error
+                    _result = _ssh.run(_comm)
+                    logger.log(VERBOSE, [_result.output, _result.stderr_output])
+                    # Hopefully shsub returned meaningful job ID
+                    _ssh_id = _result.output.strip()
+                except:
+                    job.die("@SSH - Unable to submit job %s." % job.id(), exc_info=True)
+                    return False
+
+                # Store the SSH job ID
+                job.scheduler = Jobs.SchedulerQueue(scheduler=self.name, id=_ssh_id, queue=_queue)
+                # Reduce memory footprint
+                job.compact()
+
+                logger.info("Job successfully submitted: %s", job.id())
         except:
             logger.error("@SSH - Unable to connect to DB.", exc_info=True)
-        if _job_count < 0:
-            return False
-        # @TODO fix !!! self.max_jobs[_queue], check that queue is defined,
-        # otherwise use some default. What happens with the job when submit
-        # fails - switch to waiting state? What if someting is mosconfigured
-        # and it will never enter queue - max submit retries?
-        if _job_count >= self.max_jobs:
-            return False
 
-        # Path names
-        _work_dir = os.path.join(self.work_path, job.id())
-        _run_script = os.path.join(_work_dir, "pbs.sh")
-        _output_log = os.path.join(_work_dir, "output.log")
-
-        # @TODO handle timouts etc ...
-        try:
-            # Submit
-            logger.debug("@SSH - Submitting new job: %s@%s", _user, _queue)
-            # Run shsub with proper user permissions
-            _shsub = os.path.join(os.path.dirname(conf.daemon_path_installdir),
-                                  "Scripts")
-            _shsub = os.path.join(_shsub, "shsub")
-            _ssh = self.__get_ssh_connection(_queue, _user)
-            _comm = [_shsub, "-i", job.id(), "-d", _work_dir, "-o",
-                     _output_log, _run_script]
-            logger.log(VERBOSE, "@SSH - Running command: %s", _comm)
-            # Submit the job. Will rise exception if shsub would return an error
-            _result = _ssh.run(_comm)
-            logger.log(VERBOSE, [_result.output, _result.stderr_output])
-            # Hopefully shsub returned meaningful job ID
-            _ssh_id = _result.output.strip()
-        except:
-            job.die("@SSH - Unable to submit job %s." % job.id(), exc_info=True)
-            return False
-
-        # Store the SSH job ID
-        job.scheduler = Jobs.SchedulerQueue(scheduler=self.name, id=_ssh_id, queue=_queue)
-        # Reduce memory footprint
-        job.compact()
-
-        logger.info("Job successfully submitted: %s", job.id())
         return True
 
     @rollback(SQLAlchemyError)
@@ -995,28 +996,28 @@ class DummyScheduler(Scheduler):
         # from JobManager
         _job_count = -1
         try:
-            _session = G.STATE_MANAGER.new_session()
-            _job_count = G.STATE_MANAGER.get_job_count(scheduler=self.name,
-                                                         session=_session)
-            _session.close()
+            with Jobs.session_scope(self.state_manager) as _session:
+                _job_count = self.state_manager.get_job_count(scheduler=self.name,
+                                                             session=_session)
+                if _job_count < 0:
+                    return False
+                # @TODO fix !!! self.max_jobs[_queue], check that queue is defined,
+                # otherwise use some default. What happens with the job when submit
+                # fails - switch to waiting state? What if someting is mosconfigured
+                # and it will never enter queue - max submit retries?
+                if _job_count >= self.max_jobs:
+                    logger.debug("Active scheduler jobs limit reached - job will be held")
+                    return False
+
+                # Store the SSH job ID
+                job.scheduler = Jobs.SchedulerQueue(scheduler=self.name, id=0, queue="default")
+                # Reduce memory footprint
+                job.compact()
+
+                logger.info("Job successfully submitted: %s", job.id())
         except:
             logger.error("Unable to connect to DB.", exc_info=True)
-        if _job_count < 0:
-            return False
-        # @TODO fix !!! self.max_jobs[_queue], check that queue is defined,
-        # otherwise use some default. What happens with the job when submit
-        # fails - switch to waiting state? What if someting is mosconfigured
-        # and it will never enter queue - max submit retries?
-        if _job_count >= self.max_jobs:
-            logger.debug("Active scheduler jobs limit reached - job will be held")
-            return False
 
-        # Store the SSH job ID
-        job.scheduler = Jobs.SchedulerQueue(scheduler=self.name, id=0, queue="default")
-        # Reduce memory footprint
-        job.compact()
-
-        logger.info("Job successfully submitted: %s", job.id())
         return True
 
     @rollback(SQLAlchemyError)

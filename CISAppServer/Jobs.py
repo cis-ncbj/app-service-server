@@ -10,21 +10,23 @@ import logging
 import time
 from datetime import datetime
 from subprocess import Popen, PIPE, STDOUT
-from decorator import decorator
+#from decorator import decorator
+from contextlib import contextmanager
 
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.ext.mutable import Mutable
 from sqlalchemy.exc import SQLAlchemyError, DataError
-from sqlalchemy.pool import Pool
+#from sqlalchemy.pool import Pool
 from sqlalchemy import event, create_engine, func
 from sqlalchemy.orm import relationship, backref, sessionmaker, deferred, \
         joinedload, Session
 from sqlalchemy.orm.exc import NoResultFound
-from sqlalchemy import Column, BigInteger, Integer, String, DateTime, PickleType, ForeignKey
+from sqlalchemy import Column, BigInteger, Integer, String, DateTime, \
+        PickleType, ForeignKey
 
 import Globals as G
 from Config import conf, VERBOSE, ExitCodes
-from Tools import rollback
+#from Tools import rollback
 
 
 logger = logging.getLogger(__name__)
@@ -234,9 +236,9 @@ def set_job_state_flags(target, value, oldvalue, initiator):
     target.flags_dirty |= _diff
 
 # Listeners to "delete" event for JobState instances. Call the cleanup.
-@event.listens_for(JobState, 'after_delete')
-def delete_job_state(mapper, connection, target):
-    G.STATE_MANAGER.cleanup(target.id)
+#@event.listens_for(JobState, 'after_delete')
+#def delete_job_state(mapper, connection, target):
+#    G.STATE_MANAGER.cleanup(target.id)
 
 @event.listens_for(Session, 'before_flush')
 def flush_session(thissession, flush_context, instances):
@@ -560,12 +562,14 @@ class Job(Base):
         except:
             logger.error("@Job - Cannot set job state %s.", self.id(),
                          exc_info=True)
+            raise
 
         # Store stop time
         try:
             self.status.stop_time = datetime.utcnow()
         except:
             logger.error("@Job - Cannot store job stop time.", exc_info=True)
+            raise
 
         logger.info("Job %s finished: %s", self.id(), self.status.exit_state)
 
@@ -748,11 +752,11 @@ class StateManager(object):
         self.session_factory.configure(bind=self.engine)
         self.session_factory_noflush = sessionmaker(autoflush=False)
         self.session_factory_noflush.configure(bind=self.engine)
-        #: DB session handle
-        self.session = self.session_factory()
         # Create the tables in the DB (creation is skipped if tables exist)
+        _session = self.session_factory()
         Base.metadata.create_all(self.engine)
-        self.commit()
+        _session.commit()
+        _session.close()
         logger.debug("StateManager initialized")
 
     def clear(self):
@@ -773,39 +777,30 @@ class StateManager(object):
             return self.session_factory_noflush()
         return self.session_factory()
 
-    def expire_session(self, session=None):
+    def expire_session(self, session):
         """
         Expire session cache. Will reload all objects from the DB on next
         access.
 
-        :param session: if specified use this session instance instead of the
-            default.
+        :param session: SQLAlchemy session instance.
         """
-        if session is None:
-            session = self.session
         session.expire_all()
 
-    @rollback(SQLAlchemyError)
-    def commit(self, session=None):
+    def commit(self, session):
         """
         Commit changes to the DB. Invalidates SQLAlchemy ORM instances.
 
-        :param session: if specified use this session instance instead of the
-            default.
+        :param session: SQLAlchemy session instance.
         """
         logger.log(VERBOSE, "@StateManager: Commit session to DB")
-        if session is None:
-            session = self.session
-
         session.commit()
 
-    def check_commit(self, session=None):
+    def check_commit(self, session):
         """
         Commit changes to the DB. Repeat several times in case of failure.
         Invalidates SQLAlchemy ORM instances.
 
-        :param session: if specified use this session instance instead of the
-            default.
+        :param session: SQLAlchemy session instance.
         :return: True if succeded, False otherwise.
         """
         _commit = False
@@ -814,8 +809,6 @@ class StateManager(object):
         for _i in range(5):
             try:
                 self.commit(session)
-                if session is not None:
-                    session.close()
                 _commit = True
                 logger.log(VERBOSE, "Commit to DB successfull.")
                 break
@@ -825,35 +818,30 @@ class StateManager(object):
                     logger.warning('Commit to DB failed - retry.', exc_info=True)
                 else:
                     logger.error('Unable to commit changes to DB.', exc_info=True)
+                    raise
             # Increase delay exponentialy
             time.sleep(_time)
             _time *= 4
 
         return _commit
 
-    @rollback(SQLAlchemyError)
-    def flush(self, session=None):
+    def flush(self, session):
         """
         Flush changes to the DB transaction. The data are not persisted (or
         available for other transactions) until a call to commit.
 
-        :param session: if specified use this session instance instead of the
-            default.
+        :param session: SQLAlchemy session instance.
         """
         logger.log(VERBOSE, "@StateManager: Flush session to DB")
-        if session is None:
-            session = self.session
-
         session.flush()
 
-    def poll_gw(self, session=None):
+    def poll_gw(self, session):
         """
         Check for changes in job states issued by the AppGW.
 
         If found merge them into the DB.
 
-        :param session: if specified use this session instance instead of the
-            default.
+        :param session: SQLAlchemy session instance.
         """
         raise NotImplementedError
 
@@ -865,7 +853,7 @@ class StateManager(object):
         """
         raise NotImplementedError
 
-    def new_job(self, job_id):
+    def new_job(self, session, job_id):
         """
         Create new Job instance with job_id identifier and attach it to DB
         session.
@@ -873,86 +861,74 @@ class StateManager(object):
         Depending on the implementation can query the AppGW and set the proper
         job state.
 
+        :param session: SQLAlchemy session instance.
         :param job_id: the unique job identifier.
         :return: the new Job instance.
         """
         raise NotImplementedError
 
-    def attach_job(self, job, session=None):
+    def attach_job(self, session, job):
         """
         Attach a Job instance to the DB session.
 
+        :param session: SQLAlchemy session instance.
         :param job: the Job instance.
-        :param session: if specified use this session instance instead of the
-            default.
         """
-        if session is None:
-            session = self.session
         logger.log(VERBOSE, "@StateManager: Will attach job %s to the session.", job.id())
         session.add(job)
 
-    def detach_job(self, job, session=None):
+    def detach_job(self, session, job):
         """
         Attach a Job instance to the DB session.
 
+        :param session: SQLAlchemy session instance.
         :param job: the Job instance.
-        :param session: if specified use this session instance instead of the
-            default.
         """
-        if session is None:
-            session = self.session
         logger.log(VERBOSE, "@StateManager: Will detach job %s from session.", job.id())
         # Make sure no changes are pending
         self.commit(session)
         session.expunge(job)
 
-    def merge_job(self, job, session=None):
+    def merge_job(self, session, job):
         """
         Merge state of a Job instance into the DB session.
 
+        :param session: SQLAlchemy session instance.
         :param job: the Job instance.
-        :param session: if specified use this session instance instead of the
-            default.
         """
-        if session is None:
-            session = self.session
         # Make sure no changes are pending
         self.commit(session)
         session.merge(job)
 
-    @rollback(SQLAlchemyError)
-    def get_job(self, job_id, session=None):
+    def get_job(self, session, job_id):
         """
         Get Job object from the job queue.
 
+        :param session: SQLAlchemy session instance.
         :param job_id: Job unique ID,
-        :param session: if specified use this session instance instead of the
-            default.
         :return: Job object for *job_id*, None if job_id was not found in the
             queue.
         """
-        if session is None:
-            session = self.session
-
         return session.query(Job).join(JobState).filter(JobState.id == job_id).one()
 
-    def get_new_job_list(self):
+    def get_new_job_list(self, session):
         """
         Query AppGW for a list of jobs that are in a *new* state.
 
         For each job in *new* state a Job instance will be created and attached
         to the default DB session. The jobs are set into waiting state.
 
+        :param session: SQLAlchemy session instance.
         :return: a list of Job instances that were in the *new* state.
         """
         raise NotImplementedError
 
-    @rollback(SQLAlchemyError)
-    def get_job_list(self, state="all", service=None, scheduler=None,
-            flag=None, session=None):
+    def get_job_list(self, session, state="all", service=None, scheduler=None,
+                     flag=None):
         """
         Get a list of jobs that are in a selected state.
 
+        :param session: SQLAlchemy session instance.
         :param state: Specifies state for which Jobs will be selected. To
             select all jobs specify 'all' as the state. Valid states consist of
             job states and flags: waiting, processing, queued, running,
@@ -961,15 +937,10 @@ class StateManager(object):
             service.
         :param flag: if specified select only jobs with the flag (or set of
             flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
-        :param session: if specified use this session instance instead of the
-            default.
 
         :return: List of Job instances sorted by submit time.
         :raises:
         """
-        if session is None:
-            session = self.session
-
         # Validate input
         if scheduler is not None and scheduler not in G.SCHEDULER_STORE:
             logger.error(
@@ -1002,19 +973,17 @@ class StateManager(object):
         # Execute query
         return _q.all()
 
-    @rollback(SQLAlchemyError)
-    def get_job_list_byid(self, ids, session=None, full=False):
+    def get_job_list_byid(self, session, ids, full=False):
         """
         Get a list of jobs that are in a selected state.
 
+        :param session: SQLAlchemy session instance.
         :param ids:
+        :param full: if set to True perform eager load.
 
         :return: List of Job instances sorted by submit time.
         :raises:
         """
-        if session is None:
-            session = self.session
-
         # Validate input
         if not len(ids):
             logger.error("Empty list of job IDS.")
@@ -1036,12 +1005,12 @@ class StateManager(object):
         # Execute query
         return _q.all()
 
-    @rollback(SQLAlchemyError)
-    def get_job_count(self, state="all", service=None, scheduler=None,
-                      flag=None, session=None):
+    def get_job_count(self, session, state="all", service=None, scheduler=None,
+                      flag=None):
         """
         Get a count of jobs that are in a selected state.
 
+        :param session: SQLAlchemy session instance.
         :param str state: Specifies state for which Jobs will be selected. To
             select all jobs specify 'all' as the state. Valid states consist of
             job states and flags: waiting, processing, queued, running,
@@ -1050,14 +1019,9 @@ class StateManager(object):
             selected service.
         :param int flag: if specified select only jobs with the flag (or set of
             flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
-        :param Session session: if specified use this session instance instead
-            of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
         """
-        if session is None:
-            session = self.session
-
         _job_count = -1
 
         # Validate input
@@ -1090,24 +1054,20 @@ class StateManager(object):
         # Execute query
         return _q.count()
 
-    def get_active_job_count(self, service=None, scheduler=None, flag=None,
-                      session=None):
+    def get_active_job_count(self, session, service=None, scheduler=None,
+                             flag=None):
         """
         Get a count of jobs that are active.
 
+        :param session: SQLAlchemy session instance.
         :param str service: if specified select only jobs that belong to
             selected service.
         :param int flag: if specified select only jobs with the flag (or set of
             flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
-        :param Session session: if specified use this session instance instead
-            of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
         :raises:
         """
-        if session is None:
-            session = self.session
-
         _job_count = -1
 
         # Validate input
@@ -1135,24 +1095,19 @@ class StateManager(object):
 
         return _job_count
 
-    @rollback(SQLAlchemyError)
-    def get_job_state_counters(self, service=None, scheduler=None, flag=None, session=None):
+    def get_job_state_counters(self, session, service=None, scheduler=None, flag=None):
         """
         Get a count of jobs that are in a selected state.
 
+        :param session: SQLAlchemy session instance.
         :param str service: if specified select only jobs that belong to
             selected service.
         :param int flag: if specified select only jobs with the flag (or set of
             flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
-        :param Session session: if specified use this session instance instead
-            of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
         :raises:
         """
-        if session is None:
-            session = self.session
-
         _job_count = []
 
         # Validate input
@@ -1183,24 +1138,19 @@ class StateManager(object):
         # Execute query
         return _q.all()
 
-    @rollback(SQLAlchemyError)
-    def get_active_service_counters(self, scheduler=None, flag=None, session=None):
+    def get_active_service_counters(self, session, scheduler=None, flag=None):
         """
         Get a count of jobs that are in a selected state.
 
+        :param session: SQLAlchemy session instance.
         :param str service: if specified select only jobs that belong to
             selected service.
         :param int flag: if specified select only jobs with the flag (or set of
             flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
-        :param Session session: if specified use this session instance instead
-            of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
         :raises:
         """
-        if session is None:
-            session = self.session
-
         _job_count = []
 
         # Validate input
@@ -1232,24 +1182,19 @@ class StateManager(object):
         # Execute query
         return _q.all()
 
-    @rollback(SQLAlchemyError)
-    def get_quota_service_counters(self, scheduler=None, flag=None, session=None):
+    def get_quota_service_counters(self, session, scheduler=None, flag=None):
         """
         Get a size of quota used by jobs per service.
 
+        :param session: SQLAlchemy session instance.
         :param str scheduler: if specified select only jobs that belong to
             selected scheduler.
         :param int flag: if specified select only jobs with the flag (or set of
             flags) set to ON. Valid flags are defined in :py:class:`JobSTate`.
-        :param Session session: if specified use this session instance instead
-            of the default.
 
         :return: Number of jobs in the selected state, or -1 in case of error.
         :raises:
         """
-        if session is None:
-            session = self.session
-
         _quota_count = []
 
         # Validate input
@@ -1273,19 +1218,16 @@ class StateManager(object):
         # Execute query
         return _q.all()
 
-    @rollback(SQLAlchemyError)
-    def remove_flags(self, flag, service='all', session=None):
+    def remove_flags(self, session, flag, service='all'):
         """
         Clear flags for jobs that belong to selected service.
 
+        :param session: SQLAlchemy session instance.
         :param flag: The flag to clear.
         :param service: Name of the affected service. If equals to "all" flag
           is cleared for every job.
         :throws:
         """
-        if session is None:
-            session = self.session
-
         # Input validation
         if service != 'all' and service not in G.SERVICE_STORE:
             raise Exception("@StateManager - Unknown service %s." % service)
@@ -1310,27 +1252,28 @@ class StateManager(object):
         #    JobState.flags_dirty: JobState.flags_dirty &= ~flag
         #    }, sychronize_session='fetch')
 
-    @rollback(SQLAlchemyError)
-    def delete_job(self, job, session=None):
+    def delete_job(self, session, job):
         '''
         Remove all job persistant data. Except for the output directory.
 
-        :param jid: Job ID
+        :param session: SQLAlchemy session instance.
+        :param job: Job instance
         :throws:
         '''
-        if session is None:
-            session = self.session
-
+        # Make sure databese is in consistent state
+        _id = job.id()
         session.delete(job)
+        self.commit(session)
+        # Propagate changes to GW
+        self.cleanup(_id)
 
 class FileStateManager(StateManager):
-    def new_job(self, jid, session=None):
+    def new_job(self, session, jid):
         _job = Job(jid)
-        self.attach_job(_job, session)
+        self.attach_job(session, _job)
         return _job
 
-    @rollback(SQLAlchemyError)
-    def get_new_job_list(self):
+    def get_new_job_list(self, session):
         logger.log(VERBOSE, u"@FileStateManager - Query job requests")
 
         _path = conf.gate_path_new
@@ -1356,7 +1299,7 @@ class FileStateManager(StateManager):
         # a commit anyway. What if job is malformed and results in an SQL error?
         # We should singleout such jobs and throw them away ...
         try:
-            self.commit()
+            self.commit(session)
         except DataError:
             # TODO
             # Are the job objects invalidated?? Should we remove them?? Should
@@ -1374,7 +1317,7 @@ class FileStateManager(StateManager):
                 if _job is None:
                     continue
                 try:
-                    self.commit()
+                    self.commit(session)
                 except DataError:
                     _js = JobState()
                     _js.id = _jid
@@ -1388,11 +1331,8 @@ class FileStateManager(StateManager):
 
         return _jobs
 
-    @rollback(SQLAlchemyError)
-    def commit(self, session=None):
+    def commit(self, session):
         logger.log(VERBOSE, "@FileStateManager: Push status changes to AppGW.")
-        if session is None:
-            session = self.session
 
         session.flush()
 
@@ -1423,10 +1363,8 @@ class FileStateManager(StateManager):
 
         super(FileStateManager, self).commit(session)
 
-    def poll_gw(self, session=None):
+    def poll_gw(self, session):
         logger.log(VERBOSE, u"@FileStateManager: Poll AppGW for status changes.")
-        if session is None:
-            session = self.session
 
         # Kill flags
         _path = conf.gate_path_flag_stop
@@ -1439,14 +1377,14 @@ class FileStateManager(StateManager):
         logger.log(VERBOSE, u"@FileStateManager: Obtained job kill flags.")
 
         #@TODO should we use session??
-        for _job in self.get_job_list(flag=JobState.FLAG_STOP):
+        for _job in self.get_job_list(session, flag=JobState.FLAG_STOP):
             if _job.id() in _list:
                 _list.remove(_job.id())
 
         #@TODO set flag in one query ??
         for _id in _list:
             try:
-                _job = self.get_job(_id)
+                _job = self.get_job(session, _id)
                 _job.set_flag(JobState.FLAG_STOP)
             except NoResultFound as e:
                 logger.error('Job %s not found in the DB. Will remove.' % _id, exc_info=True)
@@ -1463,14 +1401,14 @@ class FileStateManager(StateManager):
             return
         logger.log(VERBOSE, u"@FileStateManager: Obtained job delete flags: %s", _list)
 
-        for _job in self.get_job_list(flag=JobState.FLAG_DELETE):
+        for _job in self.get_job_list(session, flag=JobState.FLAG_DELETE):
             if _job.id() in _list:
                 _list.remove(_job.id())
 
         #@TODO set flag in one query ??
         for _id in _list:
             try:
-                _job = self.get_job(_id)
+                _job = self.get_job(session, _id)
                 _job.set_flag(JobState.FLAG_DELETE)
             except NoResultFound as e:
                 logger.error('Job %s not found in the DB. Will remove.' % _id, exc_info=True)
@@ -1728,3 +1666,35 @@ class FileStateManager(StateManager):
         # Remove the dirty flag
         status.flags_dirty = 0
 
+@contextmanager
+def session_scope(state_manager):
+    """
+    Provide a transactional scope around a series of operations.
+
+    :param state_manager: - instance of StateManager class used for DB
+        communication.
+    """
+    if not isinstance(state_manager, StateManager):
+        raise Exception("Object is not an StateManager instance: %s",
+                        type(state_manager))
+    session = state_manager.new_session(autoflush=False)
+    try:
+        yield session
+        state_manager.commit(session)
+    except:
+        session.rollback()
+        logger.log(VERBOSE, "Rollback DB session")
+        raise
+    finally:
+        session.close()
+
+def state_manager_factory(name="FileStateManager"):
+    """
+    Generate StateManager instance.
+
+    :param name: - StateManager type as string. Supported types: FileStateManager.
+    """
+    if name == "FileStateManager":
+        return FileStateManager()
+    else:
+        raise Exception("Unknown StateManager type: %s." % name)
