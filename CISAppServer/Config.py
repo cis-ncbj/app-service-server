@@ -204,6 +204,8 @@ class Config(dict):
         self.pbs_path_work = 'PBS/Scratch'
         self.pbs_default_queue = 'a12h'  #: Name of default PBS queue
         self.pbs_max_jobs = 100  #: Maximum number of concurent PBS jobs
+        #: Timeout in seconds for PBS commands (qstat, qsub, qdel)
+        self.pbs_timeout = 60
         #: Path where SSH backend will store job IDs
         self.ssh_path_queue = 'SSH/Queue'
         #: Path where SSH backeng will create job working directories

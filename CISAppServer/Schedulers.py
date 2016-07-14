@@ -13,7 +13,8 @@ import spur
 import threading
 import random
 
-from subprocess import Popen, PIPE, STDOUT
+# Import subprocess32 module from pip
+from subprocess32 import Popen, PIPE, STDOUT, TimeoutExpired
 
 from jinja2 import Environment, FileSystemLoader, Template
 
@@ -495,7 +496,8 @@ class PbsScheduler(Scheduler):
                     # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
                     # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
                     _opts = ['/usr/bin/qsub', '-q', _queue, '-d', _work_dir, '-j',
-                             'oe', '-o', _output_log, '-l', 'epilogue=epilogue.sh',
+                             'oe', '-o', _output_log, '-b', conf.pbs_timeout,
+                             '-l', 'epilogue=epilogue.sh',
                              _run_script]
                     logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
                     _proc = Popen(_opts, stdout=PIPE, stderr=PIPE)
@@ -551,7 +553,8 @@ class PbsScheduler(Scheduler):
                 _opts = ["/usr/bin/qstat", "-f", "-x", "-u", _usr]
                 logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
                 _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
-                _output = _proc.communicate()[0]
+                # Requires subprocess32 module from pip
+                _output = _proc.communicate(timeout=conf.pbs_timeout)[0]
                 logger.log(VERBOSE, _output)
                 # Check return code. If qstat was not killed by signal Popen
                 # will not rise an exception
@@ -561,6 +564,11 @@ class PbsScheduler(Scheduler):
                         "/usr/bin/qstat returned non zero exit code.\n%s" %
                         str(_output)
                     ))
+            except TimeoutExpired:
+                _proc.kill()
+                logger.error("@PBS - Unable to check jobs state.",
+                             exc_info=True)
+                return
             except:
                 logger.error("@PBS - Unable to check jobs state.",
                              exc_info=True)
@@ -665,7 +673,7 @@ class PbsScheduler(Scheduler):
         # _comm = "/usr/bin/qdel %s" % _pbs_id
         # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
         # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
-        _opts = ['/usr/bin/qdel', _pbs_id]
+        _opts = ['/usr/bin/qdel', '-b', conf.pbs_timeout, _pbs_id]
         logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
         _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
         _output = _proc.communicate()[0]
