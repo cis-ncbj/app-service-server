@@ -14,7 +14,7 @@ import threading
 import random
 
 # Import subprocess32 module from pip
-from subprocess import Popen, PIPE, STDOUT, TimeoutExpired
+from subprocess32 import Popen, PIPE, STDOUT, TimeoutExpired
 
 from jinja2 import Environment, FileSystemLoader, Template
 
