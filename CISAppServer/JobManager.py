@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class JobManager(object):
     """
-    Main calss of CISAppServer. It is responsible for job management.
+    Main class of CISAppServer. It is responsible for job management.
     """
 
     def __init__(self):
@@ -81,6 +81,8 @@ class JobManager(object):
                 )
         self.__thread_list_submit = []
         self.__thread_list_cleanup = []
+        # RabbitMQ
+        self.__rabbit = Rabbit
 
     def clear(self):
         _start_time = datetime.utcnow()

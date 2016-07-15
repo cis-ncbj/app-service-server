@@ -110,6 +110,19 @@ class Config(dict):
         #: prevent lost connections to MySQL which closes them by default after
         #: 8 hours.
         self.config_db_recycle = 3600
+        #: Hostname of rabbitmq server
+        self.config_rabbit_host = 'localhost'
+        #: Vhost name for rabbitmq
+        self.config_rabbit_vhost = '/'
+        #: Port where rabbitmq listens
+        self.config_rabbit_port = 5672
+        #: RabbitMQ username
+        self.config_rabbit_user = 'guest'
+        #: RabbitMQ password
+        self.config_rabbit_password = 'guest'
+        #: RabbitMQ delay in miliseconds for deleyed queues - to change the
+        #: delay queues have to be removed and recreated.
+        self.config_rabbit_requeue_delay = 5000
         #: Sleep interval in seconds between job status queries
         self.config_sleep_time = 5
         #: Every n-th status query dump the progress logs
