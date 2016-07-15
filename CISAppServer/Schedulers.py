@@ -496,7 +496,7 @@ class PbsScheduler(Scheduler):
                     # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
                     # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
                     _opts = ['/usr/bin/qsub', '-q', _queue, '-d', _work_dir, '-j',
-                             'oe', '-o', _output_log, '-b', conf.pbs_timeout,
+                             'oe', '-o', _output_log, '-b', str(conf.pbs_timeout),
                              '-l', 'epilogue=epilogue.sh',
                              _run_script]
                     logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
@@ -673,7 +673,7 @@ class PbsScheduler(Scheduler):
         # _comm = "/usr/bin/qdel %s" % _pbs_id
         # _sudo = "/usr/bin/sudo /bin/su -c \"%s\" %s" % (_comm, _user)
         # _opts = ['/usr/bin/ssh', '-t', '-t', 'local', _sudo]
-        _opts = ['/usr/bin/qdel', '-b', conf.pbs_timeout, _pbs_id]
+        _opts = ['/usr/bin/qdel', '-b', str(conf.pbs_timeout), _pbs_id]
         logger.log(VERBOSE, "@PBS - Running command: %s", _opts)
         _proc = Popen(_opts, stdout=PIPE, stderr=STDOUT)
         _output = _proc.communicate()[0]
