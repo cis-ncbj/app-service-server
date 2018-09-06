@@ -1,0 +1,7 @@
+decorator
+lockfile
+python-daemon
+spur
+SQLAlchemy
+subprocess32
+Yapsy
